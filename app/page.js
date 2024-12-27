@@ -163,7 +163,7 @@ const Home = () => {
               <header className="bg-white p-4 text-gray-700 flex justify-between">
                 <div className="text-xl font-semibold cursor-pointer flex">
                  
-                  <img src={getImageURL(user?.photo)} height={40} width={40} className="border-red-500 rounded-full" title={user?.name}/>
+                  <img src={getImageURL(user?.photo)} height={40} width={40} className="border-2 border-red-400 rounded-full" title={user?.name}/>
                   <span className="ml-2 mt-2">{user?.name}</span>
                   {
                     activeUsers.includes(user?._id) && (<sup className="p-1 bg-green-500 rounded" style={{height:"0px", marginTop: "10px"}}></sup>)

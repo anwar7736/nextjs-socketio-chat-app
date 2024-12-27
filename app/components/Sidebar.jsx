@@ -49,7 +49,7 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
             <header className="p-1 border-b border-gray-300 flex justify-between items-center bg-purple-600 text-white">
 
                 <div className="cursor-pointer mt-3 flex pb-2">
-                    <img src={getImageURL(user?.photo)} className="border-red-500 rounded-full w-10	h-10" title={user?.name} onClick={(e) => setIsDropdownOpen(true)}/>
+                    <img src={getImageURL(user?.photo)} className="border-2 border-red-400 rounded-full w-10	h-10" title={user?.name} onClick={(e) => setIsDropdownOpen(true)}/>
                     <h1 className="text-xs xs:text-sm sm:text-lg md:text-xl xl:text-2xl font-semibold px-1 mt-1">{user?.name}</h1>
                     <div>
                         <IoMdArrowDropdown title="More" className="mt-3 w-4 mr-4" onMouseOver={(e) => setIsDropdownOpen(true)} />

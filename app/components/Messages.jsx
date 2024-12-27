@@ -30,7 +30,7 @@ const Messages = () => {
             cancelButtonText: "No"
           }).then(async (result) => {
             if (result.isConfirmed) {
-              let method = (msg?.sender[0]?._id === user?._id) ? "DELETE" : "PATCH";
+              let method = (msg?.sender?._id === user?._id) ? "DELETE" : "PATCH";
               let res = await fetch(`/api/messages/${msg?._id}`, {method});
               res = await res.json();
               if (res.success) {
@@ -51,27 +51,27 @@ const Messages = () => {
     return (
         <div className="h-screen overflow-y-auto p-4 pb-40" id="root" ref={elementRef}>
             {
-                messages?.map(message => {
+                messages?.map(data => {
                     {
-                    const sender = message?.sender[0];
-                    const receiver = message?.receiver[0];
-                        return (receiver?._id == user?._id && message?.status == 2)
+                    const sender = data?.sender;
+                    const receiver = data?.receiver;
+                        return (receiver?._id == user?._id && data?.status == 2)
                         ? ""
-                    : (<div key={message?._id} title="double click to remove" onDoubleClick={(e) => handleRemoveMsg(message)}>
+                    : (<div key={data?._id} title="double click to remove" onDoubleClick={(e) => handleRemoveMsg(data)}>
                         {
                             sender?._id == user?._id
                                 ?
                                 (<div className="mb-3">
                                     <div className="flex justify-end mb-1 cursor-pointer">
                                         <div className="flex max-w-96 bg-indigo-500 text-white rounded-lg p-3 gap-3">
-                                            <p>{message?.message}</p>
+                                            <p>{data?.message?.message}</p>
                                         </div>
                                         <div className="w-9 h-9 rounded-full flex items-center justify-center ml-2">
-                                            <img src={getImageURL(user?.photo)} alt="My Avatar" className="w-8 h-8 rounded-full" title={user?.name} />
+                                            <img src={getImageURL(user?.photo)} alt="My Avatar" className="border-2 border-red-400 w-8 h-8 rounded-full" title={user?.name} />
 
                                         </div>
                                     </div>
-                                    <div align="right" className="text-xs text-gray-500 mr-10">{dateTimeFormat(message?.createdAt)}
+                                    <div align="right" className="text-xs text-gray-500 mr-10">{dateTimeFormat(data?.message?.createdAt)}
                                     </div>
                                 </div>)
                                 :
@@ -81,13 +81,13 @@ const Messages = () => {
                                         </div>
                                         <div className="flex mb-1 cursor-pointer">
                                             <div className="w-9 h-9 rounded-full flex items-center justify-center mr-2">
-                                                <img src={getImageURL(sender?.photo)} alt="User Avatar" className="w-8 h-8 rounded-full" title={sender?.name}/>
+                                                <img src={getImageURL(sender?.photo)} alt="User Avatar" className="border-2 border-red-400 w-8 h-8 rounded-full" title={sender?.name}/>
                                             </div>
                                             <div className="flex max-w-96 bg-white rounded-lg p-3 gap-3">
-                                                <p className="text-gray-700">{message?.message}</p>
+                                                <p className="text-gray-700">{data?.message?.message}</p>
                                             </div>
                                         </div>
-                                        <div align="left" className="text-xs text-gray-500 ml-10">{dateTimeFormat(message?.createdAt)}
+                                        <div align="left" className="text-xs text-gray-500 ml-10">{dateTimeFormat(data?.message?.createdAt)}
                                         </div>
                                     </div>
                                 )

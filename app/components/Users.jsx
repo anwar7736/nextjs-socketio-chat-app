@@ -9,10 +9,12 @@ const Users = ({ activeUsers }) => {
   const { users, setUsers } = useContext(UserListContext)
   const {messages, setMessages} = useContext(MessageContext);
   const getMessages = async (data) => {
+      setMessages([]);
+      setUser([]);
       setUser(data);
       const index = users.findIndex(u => u?._id == data?._id);
       users[index].pending = 0;
-      let res = await fetch(`api/messages?auth_id=${auth()?._id}&user_id=${data?._id}`);
+      let res = await fetch(`api/messages?auth_id=${auth()?._id}&ref_id=${data?._id}&is_group=${data?.is_group}`);
           res = await res.json();
       if(res.success){
         setMessages(res.data);
@@ -25,8 +27,8 @@ const Users = ({ activeUsers }) => {
       {
         users.length > 0 ? users?.map(u => {
           return  (<div key={u?._id} className={`${u?._id == user?._id ? 'bg-gray-300' : ''} flex items-center mb-4 cursor-pointer hover:bg-gray-300 p-2 rounded-md`} onClick={() => getMessages(u)} >
-          <div className="w-12 h-12 bg-gray-300 rounded-full mr-2">
-              <img src={getImageURL(u?.photo)} alt="User Avatar" className="w-12 h-12 rounded-full" title={u?.name}/>
+          <div className="w-12 h-12 bg-gray-300 rounded-full mr-" >
+              <img src={getImageURL(u?.photo)} alt="User Avatar" className="w-12 h-12 rounded-full border-2 border-red-400" title={u?.name}/>
           </div>
           <div className="flex-1">
               <div className="flex">
