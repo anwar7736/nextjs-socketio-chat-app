@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { messageSchema } from "@/app/models/messageModel";
 import mongoose from "mongoose";
 import { messageLogSchema } from "@/app/models/messageLogModel";
+import { groupMemberSchema } from "@/app/models/groupMemberModel";
 mongoDB_connect();
 export async function GET(request) {
   let success = false;
@@ -126,19 +127,65 @@ export async function GET(request) {
   }
 }
 
-
-
 export async function POST(request) {
-  request = await request.json();
+  const {sender_id, receiver_id, message, is_group} = await request.json();
   let success = false;
   let data = [];
-  let res = await new messageSchema(request);
-      res = await res.save();
-  if(res)
-  {
-    success = true;
-    data = res;
+  let res;
+  let msgInputs = {
+      "sender_id": sender_id,
+      "message":message,
   }
+  if(is_group){
+    msgInputs.group_id = receiver_id;
+  }
+
+  let msg = await new messageSchema(msgInputs);
+      msg = await msg.save();
+  if(msg)
+  {
+    if(is_group){
+      msgInputs = [];
+      let members = await groupMemberSchema.find({group_id:receiver_id, status:1}, {user_id:1, _id:0});
+      if(members.length > 0){
+        members.map(member =>{
+          msgInputs.push({
+            "message_id": msg?._id,
+            "group_id": msg?.group_id,
+            "sender_id": msg?.sender_id,
+            "receiver_id": member?.user_id,
+            "status": new mongoose.Types.ObjectId(msg?.sender_id).equals(new mongoose.Types.ObjectId(member?.user_id)) ? 1 : 0
+
+          });
+        });
+      }
+
+      if(msgInputs.length > 0){
+        res = await messageLogSchema.insertMany(msgInputs);
+        if(res) success = true;
+      }
+
+    }else{
+      msgInputs = {
+            "message_id": msg?._id,
+            "sender_id": msg?.sender_id,
+            "receiver_id": receiver_id,
+      };
+
+      res = await new messageLogSchema(msgInputs);
+      res = await res.save();
+      if(res) success = true;
+    }
+  }
+
+  if(success) {
+    data = {
+      "sender_id": msg?.sender_id,
+      "receiver_id": receiver_id,
+      "is_group": is_group,
+    };
+  }
+
   return NextResponse.json({ success, data });
 }
 

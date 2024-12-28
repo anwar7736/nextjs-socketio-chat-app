@@ -6,7 +6,7 @@ import { FaVideo } from "react-icons/fa";
 import { MdAddIcCall } from "react-icons/md";
 import { UserContext } from './contexts/UserContext';
 import { MessageContext } from './contexts/MessageContext';
-import { auth, getImageURL, socket_connection } from './helpers/helper';
+import { auth, getImageURL, loadMessages, socket_connection } from './helpers/helper';
 import { UserListContext } from './contexts/UserListContext';
 let socket = socket_connection();
 const Home = () => {
@@ -21,7 +21,6 @@ const Home = () => {
     let res = await fetch(`/api/users?auth_id=${auth()?._id}&search=${search}`);
     res = await res.json();
     if (res.success) {
-      console.log(res.data);
       setUsers(res.data);
     }
   }
@@ -36,33 +35,20 @@ const Home = () => {
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    const data = { "message": message, "sender_id": authUser._id, "receiver_id": user._id };
     setMessage('');
+    const data = { 
+          "message": message, 
+          "sender_id": authUser?._id, 
+          "receiver_id": user?._id, 
+          "is_group": user?.is_group 
+    };
     let res = await fetch("api/messages", {
       method: "POST",
       body: JSON.stringify(data)
     });
     res = await res.json();
     if (res.success) {
-      socket.emit('private-message', JSON.stringify({
-        "_id": res?.data?._id,
-        "message": data?.message,
-        "createdAt": res?.data?.createdAt,
-        "sender": [
-          {
-            "_id": authUser._id,
-            "name": authUser.name,
-            "photo": authUser.photo
-          }
-        ],
-        "receiver": [
-          {
-            "_id": user._id,
-            "name": user.name,
-            "photo": user.photo
-          }
-        ]
-      }));
+      socket.emit('private-message', JSON.stringify(res.data));
     }
   }
 
@@ -70,22 +56,18 @@ const Home = () => {
   const loadRealTimeMessages = () => {
     socket.off('private-message');
     socket.on('private-message', async (data) => {
-      if (
-        (data.sender[0]._id === authUser._id && data.receiver[0]._id === user._id) ||
-        (data.sender[0]._id === user._id && data.receiver[0]._id === authUser._id)
-      ) {
-        setMessages((prev) => [...prev, data]);
-        if (data.receiver[0]._id === authUser._id) {
-          let res = await fetch("api/messages", {
-            method: "PUT",
-            body: JSON.stringify({ sender_id: user._id, receiver_id: authUser._id })
-          });
-          res = await res.json();
-        }
-
-      } else if (data.receiver[0]._id === authUser._id) {
+      console.log(data);
+      if( (data?.is_group == 1 && user?._id == data?.receiver_id) || (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
+      (data?.sender_id == user?._id && data?.receiver_id == authUser?._id))
+      {
+        let res = await loadMessages(user);
+        console.log(res);
+        
+        setMessages(res);
+      }
+       else if(data?.receiver_id == authUser?._id || data?.is_group == 1){
         let userList = [...users];
-        let index = userList.findIndex(user => user?._id == data.sender[0]._id);
+        let index = userList.findIndex(user => ( (user?._id == data.sender_id || user?._id == data.receiver_id) && user?.is_group == data?.is_group) );
         if (index >= 0) {
           userList[index].pending++;
           setUsers(userList);

@@ -2,7 +2,9 @@ import mongoose from "mongoose"
 import { getCookie, hasCookie } from "cookies-next";
 import { connectionStr } from "../lib/db";
 import { io } from "socket.io-client";
-
+import { useContext } from "react";
+import { MessageContext } from "../contexts/MessageContext";
+import { UserContext } from "../contexts/UserContext";
 export const mongoDB_connect = async () => 
 {
     return await mongoose.connect(connectionStr);
@@ -62,5 +64,13 @@ export const getImageURL = (imageName, type = null) => {
     }
     else{
         return null;
+    }
+}
+
+export const loadMessages = async (data)=> {
+  let res = await fetch(`api/messages?auth_id=${auth()?._id}&ref_id=${data?._id}&is_group=${data?.is_group}`);
+  res = await res.json();
+  if(res.success){
+     return (res.data);
     }
 }

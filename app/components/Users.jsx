@@ -2,7 +2,7 @@
 import { useContext, useEffect, useState } from 'react';
 import { UserContext } from '../contexts/UserContext';
 import { MessageContext } from '../contexts/MessageContext';
-import { auth, getImageURL } from '../helpers/helper';
+import { auth, getImageURL, loadMessages } from '../helpers/helper';
 import { UserListContext } from '../contexts/UserListContext';
 const Users = ({ activeUsers }) => {
   const { user, setUser } = useContext(UserContext)
@@ -14,11 +14,8 @@ const Users = ({ activeUsers }) => {
       setUser(data);
       const index = users.findIndex(u => u?._id == data?._id);
       users[index].pending = 0;
-      let res = await fetch(`api/messages?auth_id=${auth()?._id}&ref_id=${data?._id}&is_group=${data?.is_group}`);
-          res = await res.json();
-      if(res.success){
-        setMessages(res.data);
-      }
+      let res = await loadMessages(data);
+      setMessages(res);
       
   }
   

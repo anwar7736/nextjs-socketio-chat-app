@@ -41,3 +41,4 @@ export async function DELETE(request, content) {
 
   return NextResponse.json({ success, message, message_id: _id });
 }
+

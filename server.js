@@ -34,10 +34,7 @@ const io = new Server(server,{
   
       socket.on('private-message', (data) => {
           const parsedData = JSON.parse(data);
-          const receiverId = parsedData.receiver[0]._id;
-  
-          socket.emit('private-message', parsedData);
-          io.to(users[receiverId]).emit('private-message', parsedData);
+          io.emit('private-message', parsedData);
       });
 
       socket.on('message-deleted', (data) => {
