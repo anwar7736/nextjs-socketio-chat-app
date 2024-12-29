@@ -47,6 +47,11 @@ const ProfileModal = ({ isOpen, onClose }) => {
   }
 
   const handlePhotoChange = (file) => {
+    if(!file){
+      setPreview('');
+      setPhoto('');
+      return;
+    }
     setPhoto(file);
     const objectUrl = URL.createObjectURL(file);
     setPreview(objectUrl);

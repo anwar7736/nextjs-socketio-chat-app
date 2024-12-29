@@ -4,8 +4,8 @@ const groupModel = new mongoose.Schema({
     "name":String,
     "photo":String,
     "short_desc":String,
-    "status": {type: Number, default: 1 }, // 0=>inactive, 1=>active
     "created_by":mongoose.Schema.Types.ObjectId,
+    "status": {type: Number, default: 1 }, // 0=>inactive, 1=>active
 }, {
     timestamps: true
 });

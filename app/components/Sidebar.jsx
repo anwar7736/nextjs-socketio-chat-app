@@ -1,12 +1,15 @@
 import React, { useContext, useEffect, useRef, useState } from 'react'
 import Users from './Users'
-import { IoMdArrowDropdown } from "react-icons/io";
+import { IoIosAddCircleOutline, IoMdArrowDropdown } from "react-icons/io";
+import { CgProfile } from "react-icons/cg";
+import { IoPowerOutline } from "react-icons/io5";
 import { auth, getImageURL, socket_connection } from '../helpers/helper';
 import { deleteCookie } from 'cookies-next';
 import { useRouter } from 'next/navigation';
 import { MdAdd } from 'react-icons/md';
 import ProfileModal from './ProfileModal';
 import { AuthContext } from '../contexts/AuthContext';
+import AddGroupModal from './AddGroupModal';
 let socket = socket_connection();
 
 const Sidebar = ({ search, setSearch, activeUsers }) => {
@@ -14,21 +17,30 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
     const sectionRef = useRef(null);
     const router = useRouter();
     const { user, setUser } = useContext(AuthContext);
-    const [isModalOpen, setModalOpen] = useState(false);
+    const [isProfileModalOpen, setProfileModalOpen] = useState(false);
+    const [isAddGroupModalOpen, setAddGroupModalOpen] = useState(false);
 
     const toggleDropdown = () => {
         setIsDropdownOpen(!isDropdownOpen);
     };
+
     const logout = () => {
         socket.emit("user-logout", auth()?._id);
         deleteCookie('auth');
         socket.disconnect();
         router.push('/auth');
     }
+
+    const handleAddGroupModal = () => {
+        setIsDropdownOpen(false);
+        setAddGroupModalOpen(true);
+    }
+
     const handleProfileModal = () => {
         setIsDropdownOpen(false);
-        setModalOpen(true);
+        setProfileModalOpen(true);
     }
+
     const handleClickOutside = (event) => {
         if (sectionRef.current && !sectionRef.current.contains(event.target)) {
             setIsDropdownOpen(false);
@@ -61,10 +73,15 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
                             <div ref={sectionRef} className="z-10  bg-white divide-y divide-gray-100 rounded-lg shadow dark:bg-gray-700 absolute ml-24 mt-28 w-40">
                                 <ul className="py-1 px-1 text-sm dark:text-gray-200 text-purple-700 font-bold" aria-labelledby="dropdownDefaultButton">
                                     <li>
-                                        <button onClick={handleProfileModal} className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white">Profile</button>
+                                        <button onClick={handleAddGroupModal} className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white flex"><IoIosAddCircleOutline className="mr-1 mt-1 bg-purple-300 rounded-lg"/>
+                                        Add Group</button>
                                     </li>
                                     <li>
-                                        <button onClick={() => logout()} className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white">Sign out</button>
+                                        <button onClick={handleProfileModal} className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white flex"> <CgProfile className="mr-1 mt-1 bg-purple-300 rounded-lg"/>Profile</button>
+                                    </li>
+                                    <li>
+                                        <button onClick={() => logout()} className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white flex"><IoPowerOutline className="mr-1 mt-1 bg-purple-300 rounded-lg"/>
+                                        Sign out</button>
                                     </li>
                                 </ul>
                             </div>
@@ -81,8 +98,12 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
                 <Users activeUsers={activeUsers} />
             </div>
             <ProfileModal
-                isOpen={isModalOpen}
-                onClose={() => setModalOpen(false)}
+                isOpen={isProfileModalOpen}
+                onClose={() => setProfileModalOpen(false)}
+            />
+            <AddGroupModal
+                isOpen={isAddGroupModalOpen}
+                onClose={() => setAddGroupModalOpen(false)}
             />
         </div>
 
