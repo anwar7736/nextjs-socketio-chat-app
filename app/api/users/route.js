@@ -53,7 +53,8 @@ export async function GET(request) {
                         }
                     }
                 },
-                is_group: 0 // Flag for user
+                is_group: 0,
+                total_members: 0 
             }
         },
         {
@@ -63,7 +64,8 @@ export async function GET(request) {
                 photo: 1,
                 pending: 1,
                 last_activity: 1,
-                is_group: 1
+                is_group: 1,
+                total_members: 1
             }
         },
         // Union with Group Query
@@ -79,14 +81,10 @@ export async function GET(request) {
                             as: "members"
                         }
                     },
+                    // Add a stage to count the total group members
                     {
-                        $match: {
-                            members: {
-                                $elemMatch: {
-                                    user_id: new mongoose.Types.ObjectId(auth_id),
-                                    status: 1
-                                }
-                            }
+                        $addFields: {
+                            total_members: { $size: "$members" } // Count total members in the group
                         }
                     },
                     {
@@ -131,7 +129,8 @@ export async function GET(request) {
                             photo: 1,
                             pending: 1,
                             last_activity: 1,
-                            is_group: 1
+                            is_group: 1,
+                            total_members: 1
                         }
                     }
                 ]
@@ -142,6 +141,7 @@ export async function GET(request) {
             $sort: { last_activity: -1 }
         }
     ]);
+    
 
     if(data.length > 0)
     {

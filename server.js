@@ -42,6 +42,13 @@ const io = new Server(server,{
         io.to(users[parsedData?.receiver[0]?._id]).emit('message-deleted', parsedData);
       });
 
+      socket.on('add-group', (data) => {
+        const parsedData = JSON.parse(data);
+        parsedData.group_members?.map(user => {
+            io.to(users[user?.user_id]).emit('add-group', parsedData);
+        });
+      });
+
       socket.on('disconnect', () => {
           for (const userId in users) {
               if (users[userId] === socket.id) {

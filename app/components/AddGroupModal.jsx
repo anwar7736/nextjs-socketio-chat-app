@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useState } from "react";
 import ValidationError from "./ValidationError";
 import { useForm } from "react-hook-form";
 import { toast } from "react-toastify";
-import { auth, getImageURL, socket_connection } from "../helpers/helper";
+import { auth, causer_id, getImageURL, socket_connection } from "../helpers/helper";
 import { setCookie } from "cookies-next";
 import { AuthContext } from "../contexts/AuthContext";
 const socket = socket_connection();
@@ -23,26 +23,38 @@ const AddGroupModal = ({ isOpen, onClose }) => {
   const { user, setUser } = useContext(AuthContext);
 
   const addGroupFormHandler = async (data) => {
+    const filteredUsers = users.filter(user => user?.is_checked);
+    if(filteredUsers.length === 0){
+      toast.error('Please choose atleast one member!');
+      return;
+    }
+    // const adminUsers = filteredUsers.filter(user => user?.is_admin);
+    // if(adminUsers.length === 0){
+    //   toast.error('Please choose atleast one admin!');
+    //   return;
+    // }
+
+    const authUser = [{user_id:causer_id(), is_admin:true}];
+    const selectedUsers = filteredUsers.map(({user_id, is_admin}) => ({user_id, is_admin}));
+    const groupMembers = [...authUser, ...selectedUsers];
+    
     let formData = new FormData();
     formData.append('name', data.name);
-    formData.append('phone', data.phone);
-    formData.append('address', data.address);
-    formData.append('old_password', data.old_password);
-    formData.append('password', data.password);
-    formData.append('old_photo', auth()?.photo);
+    formData.append('short_desc', data.short_desc);
     formData.append('photo', photo);
-    let res = await fetch(`api/user/profile/${auth()?._id}`, {
-      method: "PUT",
+    formData.append('created_by', causer_id());
+    formData.append('group_members', JSON.stringify(groupMembers));
+    let res = await fetch("api/group", {
+      method: "POST",
       body: formData
     });
 
     res = await res.json();
     if (res.success) {
-      socket.emit("user-updated", JSON.stringify(res.data));
-      setCookie('auth', JSON.stringify(res.data));
-      setUser(auth());
-      onClose();
       toast.success(res.message);
+      console.log(JSON.stringify(res.data));
+      socket.emit("add-group", JSON.stringify(res.data));
+      onClose();
     }
     else {
       toast.error(res.message);
@@ -64,7 +76,6 @@ const AddGroupModal = ({ isOpen, onClose }) => {
     setParent(is_checked);
     const updatedUsers = users.map(user => ({...user, is_checked}));
     setUsers(updatedUsers);
-    console.log(updatedUsers)
   }
 
   const handleChildChange = (user_id) => {
@@ -74,11 +85,11 @@ const AddGroupModal = ({ isOpen, onClose }) => {
   
     setUsers(updatedUsers);
   
-    const isChecked = updatedUsers.every(user => user?.is_checked);
-    setParent(isChecked);
+    const is_checked = updatedUsers.every(user => user?.is_checked);
+    setParent(is_checked);
   };
 
-  const handleIsAdminChange = (user_id) => {
+  const handleis_adminChange = (user_id) => {
     const updatedUsers = users.map(user =>
       user?.user_id === user_id ? { ...user, is_admin: !user?.is_admin } : user
     );
@@ -95,7 +106,8 @@ const AddGroupModal = ({ isOpen, onClose }) => {
     let res = await fetch(`api/users/list?search=${search}`);
     res = await res.json();
     if (res.success) {
-      setUsers(res.data);
+      const users = res.data.filter(user => user?.user_id !== causer_id());
+      setUsers(users);
     }
   }
 
@@ -221,7 +233,7 @@ const AddGroupModal = ({ isOpen, onClose }) => {
                                 id="checkbox-table-search-1"
                                 type="checkbox"
                                 checked={user?.is_admin}
-                                onChange={(e) => handleIsAdminChange(user?.user_id)}
+                                onChange={(e) => handleis_adminChange(user?.user_id)}
                                 className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:focus:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                               /></td>
                           </tr>

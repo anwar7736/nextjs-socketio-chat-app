@@ -21,6 +21,10 @@ export const isAuth = () =>
     return hasCookie('auth') ? true : false;
 }
 
+export const causer_id = () => {
+    return isAuth() ? auth()?._id : null;
+}
+
 export const dateFormat = (date) =>
 {
     if(date)

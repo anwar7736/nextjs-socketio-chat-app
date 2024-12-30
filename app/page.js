@@ -127,6 +127,22 @@ const Home = () => {
       setMessages(filterMessages);
     });
 
+    socket.off('add-group');
+    socket.on('add-group', (data) => {
+        let newUser = {
+            _id: data?._id,
+            name: data?.name,
+            photo: data?.photo,
+            pending: 0,
+            total_members: data?.group_members?.length
+        };
+    
+        let newUsers = [...users, newUser];
+
+        setUsers(newUsers);
+    });
+    
+
   };
 
 
@@ -146,7 +162,7 @@ const Home = () => {
                 <div className="text-xl font-semibold cursor-pointer flex">
                  
                   <img src={getImageURL(user?.photo)} height={40} width={40} className="border-2 border-red-400 rounded-full" title={user?.name}/>
-                  <span className="ml-2 mt-2">{user?.name}</span>
+                  <span className="ml-2 mt-2">{user?.name} { user?.total_members > 0 ? `(${user?.total_members})` : null }</span>
                   {
                     activeUsers.includes(user?._id) && (<sup className="p-1 bg-green-500 rounded" style={{height:"0px", marginTop: "10px"}}></sup>)
                   }
