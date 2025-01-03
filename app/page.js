@@ -145,7 +145,6 @@ const Home = () => {
 
   };
 
-
   useEffect(() => {
     loadRealTimeMessages();
     loadActiveUsers();
