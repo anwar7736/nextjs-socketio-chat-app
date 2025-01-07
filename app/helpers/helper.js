@@ -18,7 +18,7 @@ export const auth = () =>
 
 export const isAuth = () => 
 {
-    return hasCookie('auth') ? true : false;
+    return hasCookie('auth');
 }
 
 export const causer_id = () => {
@@ -78,3 +78,4 @@ export const loadMessages = async (data)=> {
      return (res.data);
     }
 }
+

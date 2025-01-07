@@ -1,10 +1,9 @@
 import { getImageURL, mongoDB_connect } from "@/app/helpers/helper";
-import { userSchema } from "@/app/models/userModel";
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
 import { writeFile } from 'fs/promises';
 import { groupSchema } from "@/app/models/groupModel";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
+import mongoose from "mongoose";
 
 mongoDB_connect();
 export async function POST(request) {
@@ -79,6 +78,39 @@ export async function POST(request) {
 
 export async function GET(request) {
     let success = false;
+    const _id = request.nextUrl.searchParams.get('id');
+    const data = await groupSchema.aggregate([
+        { 
+            $match: { _id: new mongoose.Types.ObjectId(_id) } // Match the group by its ID
+        },
+        {
+            $lookup: {
+                from: 'group_members', // The name of the group_members collection in the database
+                localField: '_id', // Field in the groups collection
+                foreignField: 'group_id', // Field in the group_members collection
+                as: 'members', // Name of the output array
+            }
+        },
+        {
+            $project: {
+                _id: 1, // Include group ID
+                name: 1, // Include group name
+                members: 1
+            }
+        }
+    ]);
+    
+    if (data) {
+        success = true;
+            
+        }
+    
+    
+    return NextResponse.json({ success, data });
+}
+
+export async function PUT(request) {
+    let success = false;
     let data = [];
     data = await groupSchema.find();
     if (data) {
@@ -86,4 +118,62 @@ export async function GET(request) {
     }
 
     return NextResponse.json({ success, data });
+}
+
+export async function PATCH(request) {
+    let success = false;
+    let data = [];
+    data = await groupSchema.find();
+    if (data) {
+        success = true;
+    }
+
+    return NextResponse.json({ success, data });
+}
+
+export async function DELETE(request) {
+    let success = false;
+    let message = "";
+    const _id = request.nextUrl.searchParams.get('id');
+    const data = await groupSchema.aggregate([
+        { 
+            $match: { _id: new mongoose.Types.ObjectId(_id) } // Match the group by its ID
+        },
+        {
+            $lookup: {
+                from: 'group_members', // The name of the group_members collection in the database
+                localField: '_id', // Field in the groups collection
+                foreignField: 'group_id', // Field in the group_members collection
+                as: 'members', // Name of the output array
+            }
+        },
+        {
+            $project: {
+                _id: 1, // Include group ID
+                name: 1, // Include group name
+                members: {
+                    $map: { 
+                        input: "$members",
+                        as: "member",
+                        in: {
+                            user_id: "$$member.user_id", // Include specific member fields
+                        }
+                    }
+                }
+            }
+        }
+    ]);
+    
+    if (data) {
+        await groupMemberSchema.deleteMany({group_id: _id});
+        let res = await groupSchema.deleteOne({_id});
+        if(res){
+            success = true;
+            message = "Group deleted successfully.";
+            
+        }
+    }
+    
+    return NextResponse.json({ success, message, data });
+
 }
