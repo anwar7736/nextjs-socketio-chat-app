@@ -57,13 +57,13 @@ export async function POST(request) {
             group_id: data?._id,
             created_by,
         }));
-       if(inputs){
-        let res = await groupMemberSchema.insertMany(inputs);
-        if (res) {
-            success = true;
-            message = "Group created successfully.";
+        if (inputs) {
+            let res = await groupMemberSchema.insertMany(inputs);
+            if (res) {
+                success = true;
+                message = "Group created successfully.";
+            }
         }
-       }
     }
 
     data = {
@@ -81,7 +81,7 @@ export async function GET(request) {
     let success = false;
     const _id = request.nextUrl.searchParams.get('id');
     let data = await groupSchema.aggregate([
-        { 
+        {
             $match: { _id: new mongoose.Types.ObjectId(_id) } // Match the group by its ID
         },
         {
@@ -157,30 +157,33 @@ export async function GET(request) {
             }
         }
     ]);
-    
-    
-    
+
+
+
     if (data) {
         data = data.length > 0 ? data[0] : null;
         success = true;
-            
-        }
-    
-    
+
+    }
+
+
     return NextResponse.json({ success, data });
 }
 
 //Update group
 export async function PUT(request) {
-    let payload = await request.formData();
-    let _id = payload.get('id');
-    let name = payload.get('name');
-    let short_desc = payload.get('short_desc');
-    let photo = payload.get('photo');
-    let old_photo = request.get('old_photo');
-    let group_members = JSON.parse(payload.get('group_members'));
+    const { group_members, name, group_id, short_desc, photo, old_photo } = await request.json();
+    // let payload = await request.formData();
+    // let _id = payload.get('group_id');
+    // let name = payload.get('name');
+    // let short_desc = payload.get('short_desc');
+    // let photo = payload.get('photo');
+    // let old_photo = payload.get('old_photo');
+    let _id = group_id;
+
     let success = false;
     let data = [];
+    let response = [];
     let message = "";
     let inputs = {
         "name": name,
@@ -214,28 +217,107 @@ export async function PUT(request) {
 
     }
 
-    data = await new groupSchema.updateOne({_id}, {$set: inputs});
+    data = await groupSchema.updateOne({ _id }, { $set: inputs });
+    console.log(data);
     if (data) {
-        inputs = [];
-        inputs = group_members?.map(member => ({
-            ...member,
-            group_id: data?._id,
-        }));
-       if(inputs){
-        let res = await groupMemberSchema.insertMany(inputs);
-        if (res) {
-            success = true;
-            message = "Group created successfully.";
+        success = true;
+        message = "Group updated successfully.";
+        const groupMembersArray = group_members.map(member => member.user_id);
+        const newUsers = []; // Track newly created users
+        const updatedUsers = []; // Track updated users
+
+        // Step 1: Handle Removed Users
+        const removedUsers = await groupMemberSchema.find({
+            group_id,
+            status: 1,
+            user_id: { $nin: groupMembersArray }
+        });
+
+        const removedMsg = `You are removed from <b>${name}</b>`;
+        removedUsers.map(user => {
+            response.push({
+                user_id: user.user_id,
+                status: 0, // 0 => removed
+                message: removedMsg,
+            });
+        });
+
+        await groupMemberSchema.deleteMany(
+            { _id: { $in: removedUsers.map(user => user._id) } },
+            // { $set: { status: 0 } }
+        );
+
+        // Step 2: Handle Added or Updated Users
+        for (const member of group_members) {
+            const { user_id, is_admin } = member;
+
+            const existingMember = await groupMemberSchema.findOne({ group_id, user_id, status: 1 });
+
+            if (existingMember) {
+                // Check if is_admin has changed
+                if (existingMember.is_admin != is_admin) {
+                    const message = is_admin
+                        ? `Now you are group admin of <b>${name}</b>`
+                        : `Now you are not group admin of <b>${name}</b>`;
+                    response.push({ user_id, message });
+                    updatedUsers.push(user_id);
+                    // Update existing member
+                    await groupMemberSchema.findOneAndUpdate(
+                        { group_id, user_id }, // Find document by group_id and user_id
+                        { $set: { is_admin } }, // Set is_admin value
+                        { new: true } // Optionally return the updated document
+                    );
+                }
+
+                
+
+            } else {
+                // Create a new user
+                let res = await new groupMemberSchema({ group_id, user_id, is_admin, created_by: '67645235d9506744bb8b6a2b' });
+                    res = await res.save();
+                newUsers.push(user_id); // Track new user
+                response.push({ user_id, message: `You are added to group <b>${name}</b>` });
+            }
         }
-       }
+
+        // Step 3: Notify Unchanged Users
+        let condition = {
+            user_id: { $in: groupMembersArray },
+            status: 1, // Only active members
+        };
+
+        // If there are updated or new users, exclude them from the results
+        if (updatedUsers.length > 0 || newUsers.length > 0) {
+            condition.user_id.$nin = updatedUsers.concat(newUsers);
+        }
+
+     
+
+        // Find the users based on the condition
+        const unchangedUsers = await groupMemberSchema
+            .find(condition)
+            .distinct('user_id'); // Ensures unique user_ids
+        const groupUpdateMsg = `<b>${name}</b> information has been updated `;
+        if (unchangedUsers.length > 0 && data.modifiedCount > 0) {
+            unchangedUsers.map(user => {
+                response.push({
+                    user_id: user._id,
+                    message: groupUpdateMsg,
+                });
+            });
+        }
+
+
+        // Finalize the response
+        data = {
+            _id,
+            name,
+            photo: inputs.photo,
+            total_members: group_members?.length,
+            response,
+        };
     }
 
-    data = {
-        "_id": data?._id,
-        "name": data?.name,
-        "photo": data?.photo,
-        "group_members": group_members,
-    }
 
     return NextResponse.json({ success, message, data });
 }
@@ -248,7 +330,7 @@ export async function PATCH(request) {
     let message = "";
     const group_id = request.nextUrl.searchParams.get('group_id');
     const user_id = request.nextUrl.searchParams.get('user_id');
-    data =  await groupMemberSchema.updateOne({ group_id, user_id }, {$set: { status: 0}});
+    data = await groupMemberSchema.updateOne({ group_id, user_id }, { $set: { status: 0 } });
     if (data) {
         success = true;
         message = "You are left from this group";
