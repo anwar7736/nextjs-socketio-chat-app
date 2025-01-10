@@ -5,6 +5,9 @@ import { toast } from "react-toastify";
 import { auth, dateFormat, dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
 import { setCookie } from "cookies-next";
 import { AuthContext } from "../contexts/AuthContext";
+import { UserContext } from "../contexts/UserContext";
+import { UserListContext } from "../contexts/UserListContext";
+import { MessageContext } from "../contexts/MessageContext";
 const socket = socket_connection();
 const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   if (!isOpen) return null;
@@ -21,6 +24,9 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   const [search, setSearch] = useState('');
   const [parent, setParent] = useState(false);
   const { user, setUser } = useContext(AuthContext);
+  const { user:selectedUser, setUser: setSelectedUser } = useContext(UserContext);
+  const { users: userList, setUsers: setUserList } = useContext(UserListContext);
+  const { messages, setMessages } = useContext(MessageContext);
 
   const editGroupFormHandler = async (input) => {
     const filteredUsers = users.filter(user => user?.is_checked);
@@ -43,8 +49,8 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     formData.append('photo', photo);
     formData.append('old_photo', data.photo);
     formData.append('group_members', JSON.stringify(groupMembers));
-    formData.append('created_by', JSON.stringify(auth()?._id));
-    formData.append('creator', JSON.stringify(auth()?.name));
+    formData.append('created_by', JSON.stringify(user?._id));
+    formData.append('creator', JSON.stringify(user?.name));
     let res = await fetch("api/group", {
       method: "PUT",
       body: formData
@@ -52,6 +58,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
 
     res = await res.json();
     if (res.success) {
+      setSelectedUser({...selectedUser, total_members: res?.data?.total_members});
       toast.success(res.message);
       socket.emit("update-group", JSON.stringify(res.data));
       onClose();
@@ -62,15 +69,29 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   }
   
   const handleLeaveGroup = async () =>{
+    if(data?.is_admin)
+    {
+      const adminUsers = users.filter(u => u?.is_checked && u?.is_admin && u?.user_id !== user?._id);
+      if(adminUsers.length === 0)
+      {
+        toast.error('Please choose atleast one admin!');
+      }
+      return;
+    }
     let res = await fetch(`api/group`, {
       method: "PATCH",
-      body: JSON.stringify({group_id: data._id, user_id: auth()?._id})
+      body: JSON.stringify({group_id: data._id, user_id: user?._id})
     });
 
     res = await res.json();
     if (res.success) {
-      toast.success(res.message);
-      socket.emit("leave-group", JSON.stringify(res.group_id));
+      let newUsers = userList.filter(user => user._id !== data?._id);
+      setUserList(newUsers);
+      setSelectedUser('');
+      setMessages([]);
+      toast.success(`You are left from "${data.name}"`);
+      const response = {_id: data._id, user_id: user._id, message: `${user.name} left from "${data.name}"`};
+      socket.emit("leave-group", JSON.stringify(response));
       onClose();
     }
     else {
@@ -86,7 +107,8 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     res = await res.json();
     if (res.success) {
       toast.success(res.message);
-      socket.emit("delete-group", JSON.stringify(res.group_id));
+      const response = {_id: data._id, deleted_by: user._id, message: `"${data?.name}" deleted by ${user.name}`};
+      socket.emit("delete-group", JSON.stringify(response));
       onClose();
     }
     else {
@@ -130,23 +152,29 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     setUsers(updatedUsers);
   };
 
-
   useEffect(() => {
     loadUsers();
-  }, [search]);
+  }, [search, data]);
 
   const loadUsers = async () => {
     let res = await fetch(`api/users/list?search=${search}`);
     res = await res.json();
     if (res.success) {
-      const updatedUsers = res.data.map(user => ({
-        ...user,
-        is_checked: data?.members?.some(m => m.user_id === user.user_id),
-        is_admin: data?.members?.some(m => m.user_id === user.user_id && m.is_admin),
-        creator: data?.members?.filter(m => m.user_id === user.user_id).map(m => m.creator),
-        createdAt: data?.members?.filter(m => m.user_id === user.user_id).map(m => m.createdAt),
-      }));
-
+      let updatedUsers = [];
+      if(data?.is_admin)
+      {
+        updatedUsers = res.data.map(user => ({
+          ...user,
+          is_checked: data?.members?.some(m => m.user_id === user.user_id),
+          is_admin: data?.members?.some(m => m.user_id === user.user_id && m.is_admin),
+          creator: data?.members?.filter(m => m.user_id === user.user_id).map(m => m.creator),
+          createdAt: data?.members?.filter(m => m.user_id === user.user_id).map(m => m.createdAt),
+        }));
+      }
+      else{
+        updatedUsers = res.data.filter(user => data?.members?.some(m => m.user_id === user.user_id));
+      }
+      
       setUsers(updatedUsers);
       const is_checked = updatedUsers.every(user => user?.is_checked);
       setParent(is_checked);

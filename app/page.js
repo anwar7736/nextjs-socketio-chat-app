@@ -9,20 +9,21 @@ import { MessageContext } from './contexts/MessageContext';
 import { auth, getImageURL, loadMessages, socket_connection } from './helpers/helper';
 import { UserListContext } from './contexts/UserListContext';
 import GroupEditOrViewModal from './components/GroupEditOrViewModal';
+import { toast } from 'react-toastify';
+import { AuthContext } from './contexts/AuthContext';
 let socket = socket_connection();
 const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
   const [activeUsers, setActiveUsers] = useState([]);
   const { user, setUser } = useContext(UserContext)
+  const { user:authUser, setUser:setAuthUser } = useContext(AuthContext)
   const { messages, setMessages } = useContext(MessageContext);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const [isModalOpen, setModalOpen] = useState(false);
-  const [isGroup, setIsGroup] = useState(false);
   const [data, setData] = useState('');
-  const authUser = auth();
   const getUserList = async () => {
-    let res = await fetch(`/api/users?auth_id=${auth()?._id}&search=${search}`);
+    let res = await fetch(`/api/users?auth_id=${authUser?._id}&search=${search}`);
     res = await res.json();
     if (res.success) {
       setUsers(res.data);
@@ -91,6 +92,10 @@ const Home = () => {
     socket.off('new-user');
     socket.on('new-user', (data) => {
       getUserList();
+      if(data?._id !== authUser?._id)
+      {
+        toast.success(data?.message);
+      }
     });
 
     socket.off('user-updated');
@@ -118,8 +123,10 @@ const Home = () => {
       });
 
       setMessages(filterMessages);
-      console.log(filterMessages);
-
+      if(data?._id !== authUser?._id)
+      {
+        toast.success(data?.message);
+      }
 
     });
 
@@ -137,14 +144,88 @@ const Home = () => {
         name: data?.name,
         photo: data?.photo,
         pending: 0,
+        is_group: 1,
         total_members: data?.group_members?.length
       };
 
       let newUsers = [...users, newUser];
 
       setUsers(newUsers);
+      if(data?.created_by !== authUser?._id)
+      {
+        toast.success(data?.message);
+      }
     });
 
+    socket.off('update-group');
+    socket.on('update-group', (data) => {
+      setModalOpen(false);
+      console.log(data)
+      if(data?.res?.status === 0)
+      {
+        let newUsers = users.filter(user => user._id !== data?._id);
+        setUsers(newUsers);
+        if(user._id === data?._id)
+        {
+          setUser('');
+          setMessages([]);
+        }
+      }
+
+      if(data?.res?.status === 1)
+      {
+        let newUser = {
+          _id: data?._id,
+          name: data?.name,
+          photo: data?.photo,
+          pending: 0,
+          is_group: 1,
+          total_members: data?.total_members
+        };
+  
+        let newUsers = [...users, newUser];
+  
+        setUsers(newUsers);
+      }
+      if(user._id !== data?._id)
+      {
+        toast.success(data?.res?.message);
+      }
+      
+    });
+
+    socket.off('delete-group');
+    socket.on('delete-group', (data) => {
+      setModalOpen(false);
+      if(user._id === data?._id)
+      {
+        setUser('');
+        setMessages([]);
+      }
+      let newUsers = users.filter(user => user._id !== data?._id);
+      setUsers(newUsers);
+      if(data.deleted_by !== authUser._id)
+      {
+        toast.success(data?.message);
+      }
+    });
+
+    socket.off('leave-group');
+    socket.on('leave-group', (res) => {
+      if(user._id === res?._id)
+      {
+        setUser({...user, total_members: user.total_members - 1});
+        if(isModalOpen){
+          let newMembers = data?.members?.filter(m => m.user_id !== res?.user_id);
+          setData({...data, members:newMembers});
+        }
+      }
+
+      if(res?.user_id !== authUser?._id)
+      {
+        toast.success(res?.message);
+      }
+    });
 
   };
 
@@ -232,7 +313,6 @@ const Home = () => {
       <GroupEditOrViewModal
         isOpen={isModalOpen}
         onClose={() => setModalOpen(false)}
-        isGroup={isGroup}
         data={data}
       />
     </div>

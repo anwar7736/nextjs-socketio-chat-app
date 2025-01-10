@@ -70,6 +70,7 @@ export async function POST(request) {
         "name": data?.name,
         "photo": data?.photo,
         "group_members": group_members,
+        "created_by": data?.created_by
     }
 
     return NextResponse.json({ success, message, data });
@@ -228,7 +229,7 @@ export async function PUT(request) {
         // Step 1: Handle Removed Users
         const removedUsers = await groupMemberSchema.find({
             group_id,
-            status: 1,
+            // status: 1,
             user_id: { $nin: groupMembersArray }
         });
 
@@ -272,7 +273,7 @@ export async function PUT(request) {
                 let res = await new groupMemberSchema({ group_id, user_id, is_admin, created_by });
                 res = await res.save();
                 newUsers.push(user_id); // Track new user
-                response.push({ user_id, message: `You are added to ${name} by ${creator}` });
+                response.push({ user_id, status: 1, message: `You are added to ${name} by ${creator}` });
             }
         }
 
@@ -322,7 +323,7 @@ export async function PATCH(request) {
     let success = false;
     let data = [];
     let message = "";
-    data = await groupMemberSchema.updateOne({ group_id, user_id }, { $set: { status: 0 } });
+    data = await groupMemberSchema.updateMany({ group_id, user_id }, { $set: { status: 0 } });
     if (data) {
         success = true;
         message = "You are left from this group";

@@ -52,7 +52,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     res = await res.json();
     if (res.success) {
       toast.success(res.message);
-      console.log(JSON.stringify(res.data));
+      res.data.message = `${user?.name} created new group "${res.data.name}"`;
       socket.emit("add-group", JSON.stringify(res.data));
       onClose();
     }
@@ -89,7 +89,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     setParent(is_checked);
   };
 
-  const handleis_adminChange = (user_id) => {
+  const handleAdminChange = (user_id) => {
     const updatedUsers = users.map(user =>
       user?.user_id === user_id ? { ...user, is_admin: !user?.is_admin } : user
     );
@@ -233,7 +233,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
                                 id="checkbox-table-search-1"
                                 type="checkbox"
                                 checked={user?.is_admin}
-                                onChange={(e) => handleis_adminChange(user?.user_id)}
+                                onChange={(e) => handleAdminChange(user?.user_id)}
                                 className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:focus:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                               /></td>
                           </tr>

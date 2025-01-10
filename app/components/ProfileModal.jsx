@@ -35,6 +35,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
 
     res = await res.json();
     if (res.success) {
+      res.data.message = `${user.name} updated his profile.`;
       socket.emit("user-updated", JSON.stringify(res.data));
       setCookie('auth', JSON.stringify(res.data));
       setUser(auth());

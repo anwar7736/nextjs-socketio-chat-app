@@ -1,5 +1,6 @@
 const express = require('express');
 const { createServer } = require('http');
+const { join } = require('path');
 const { Server } = require('socket.io');
 const app = express();
 const server = createServer(app);
@@ -19,7 +20,8 @@ const io = new Server(server,{
       });
 
       socket.on('new-user', (data) => {
-          socket.broadcast.emit('new-user', data);
+        const parsedData = JSON.parse(data);
+          socket.broadcast.emit('new-user', parsedData);
       });
 
       socket.on('user-updated', (data) => {
@@ -47,6 +49,23 @@ const io = new Server(server,{
         parsedData.group_members?.map(user => {
             io.to(users[user?.user_id]).emit('add-group', parsedData);
         });
+      });
+      
+      socket.on('update-group', (data) => {
+        const parsedData = JSON.parse(data);
+        parsedData?.response?.map(res => {
+            io.to(users[res.user_id]).emit('update-group', {...parsedData, res});
+        });
+      });
+
+      socket.on('delete-group', (data) => {
+        const parsedData = JSON.parse(data);
+        socket.broadcast.emit('delete-group', parsedData);
+      });
+
+      socket.on('leave-group', (data) => {
+        const parsedData = JSON.parse(data);
+        socket.broadcast.emit('leave-group', parsedData);
       });
 
       socket.on('disconnect', () => {

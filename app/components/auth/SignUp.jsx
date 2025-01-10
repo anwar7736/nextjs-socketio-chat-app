@@ -33,6 +33,7 @@ const SignUp = () => {
     res = await res.json();
     if (res.success) {
       delete res.data.password;
+      res.data.message = `${res.data.name} registered now.`;
       socket.emit("new-user", JSON.stringify(res.data));
       setCookie('auth', JSON.stringify(res.data));
       setUser(auth());
