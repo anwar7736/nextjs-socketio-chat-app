@@ -8,6 +8,7 @@ import { UserContext } from './contexts/UserContext';
 import { MessageContext } from './contexts/MessageContext';
 import { auth, getImageURL, loadMessages, socket_connection } from './helpers/helper';
 import { UserListContext } from './contexts/UserListContext';
+import GroupEditOrViewModal from './components/GroupEditOrViewModal';
 let socket = socket_connection();
 const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
@@ -16,6 +17,9 @@ const Home = () => {
   const { messages, setMessages } = useContext(MessageContext);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
+  const [isModalOpen, setModalOpen] = useState(false);
+  const [isGroup, setIsGroup] = useState(false);
+  const [data, setData] = useState('');
   const authUser = auth();
   const getUserList = async () => {
     let res = await fetch(`/api/users?auth_id=${auth()?._id}&search=${search}`);
@@ -36,11 +40,11 @@ const Home = () => {
   const sendMessage = async (e) => {
     e.preventDefault();
     setMessage('');
-    const data = { 
-          "message": message, 
-          "sender_id": authUser?._id, 
-          "receiver_id": user?._id, 
-          "is_group": user?.is_group 
+    const data = {
+      "message": message,
+      "sender_id": authUser?._id,
+      "receiver_id": user?._id,
+      "is_group": user?.is_group
     };
     let res = await fetch("api/messages", {
       method: "POST",
@@ -57,17 +61,16 @@ const Home = () => {
     socket.off('private-message');
     socket.on('private-message', async (data) => {
       console.log(data);
-      if( (data?.is_group == 1 && user?._id == data?.receiver_id) || (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
-      (data?.sender_id == user?._id && data?.receiver_id == authUser?._id))
-      {
+      if ((data?.is_group == 1 && user?._id == data?.receiver_id) || (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
+        (data?.sender_id == user?._id && data?.receiver_id == authUser?._id)) {
         let res = await loadMessages(user);
         console.log(res);
-        
+
         setMessages(res);
       }
-       else if(data?.receiver_id == authUser?._id || data?.is_group == 1){
+      else if (data?.receiver_id == authUser?._id || data?.is_group == 1) {
         let userList = [...users];
-        let index = userList.findIndex(user => ( (user?._id == data.sender_id || user?._id == data.receiver_id) && user?.is_group == data?.is_group) );
+        let index = userList.findIndex(user => ((user?._id == data.sender_id || user?._id == data.receiver_id) && user?.is_group == data?.is_group));
         if (index >= 0) {
           userList[index].pending++;
           setUsers(userList);
@@ -110,14 +113,14 @@ const Home = () => {
           sender.name = data?.name;
           sender.photo = data?.photo;
         }
-        
+
         return msg;
       });
-      
+
       setMessages(filterMessages);
       console.log(filterMessages);
-      
-      
+
+
     });
 
     socket.off('message-deleted');
@@ -129,19 +132,19 @@ const Home = () => {
 
     socket.off('add-group');
     socket.on('add-group', (data) => {
-        let newUser = {
-            _id: data?._id,
-            name: data?.name,
-            photo: data?.photo,
-            pending: 0,
-            total_members: data?.group_members?.length
-        };
-    
-        let newUsers = [...users, newUser];
+      let newUser = {
+        _id: data?._id,
+        name: data?.name,
+        photo: data?.photo,
+        pending: 0,
+        total_members: data?.group_members?.length
+      };
 
-        setUsers(newUsers);
+      let newUsers = [...users, newUser];
+
+      setUsers(newUsers);
     });
-    
+
 
   };
 
@@ -149,6 +152,31 @@ const Home = () => {
     loadRealTimeMessages();
     loadActiveUsers();
   }, [user, authUser]);
+
+  const handleEditOrViewModal = async () => {
+    if (user.is_group === 1) {
+      let res = await fetch(`/api/group?id=${user?._id}`);
+      res = await res.json();
+      if (res.success) {
+        res.data.is_group = 1;
+        res.data.is_admin = res.data.members.some(
+          (member) => member.is_admin === 1 && member.user_id === authUser._id
+        );
+        console.log(res.data);
+        setData(res.data);
+      }
+    }
+    else {
+      let res = await fetch(`/api/user/profile/${user?._id}`);
+      res = await res.json();
+      if (res.success) {
+        res.data.is_group = 0;
+        setData(res.data);
+      }
+    }
+
+    setModalOpen(true);
+  }
 
   return (
     <div className="px-7 h-screen overflow-hidden flex items-center justify-center bg-[#edf2f7]">
@@ -158,15 +186,15 @@ const Home = () => {
           {
             user && (
               <header className="bg-white p-4 text-gray-700 flex justify-between">
-                <div className="text-xl font-semibold cursor-pointer flex">
-                 
-                  <img src={getImageURL(user?.photo)} height={40} width={40} className="border-2 border-red-400 rounded-full" title={user?.name}/>
-                  <span className="ml-2 mt-2">{user?.name} { user?.total_members > 0 ? `(${user?.total_members})` : null }</span>
+                <div className="text-xl font-semibold cursor-pointer flex" onClick={handleEditOrViewModal}>
+
+                  <img src={getImageURL(user?.photo)} height={40} width={40} className="border-2 border-red-400 rounded-full" title={user?.name} />
+                  <span className="ml-2 mt-2">{user?.name} {user?.total_members > 0 ? `(${user?.total_members})` : null}</span>
                   {
-                    activeUsers.includes(user?._id) && (<sup className="p-1 bg-green-500 rounded" style={{height:"0px", marginTop: "10px"}}></sup>)
+                    activeUsers.includes(user?._id) && (<sup className="p-1 bg-green-500 rounded" style={{ height: "0px", marginTop: "10px" }}></sup>)
                   }
                 </div>
-                <div className="flex justify-end px-2">
+                <div className="flex justify-end px-2 hidden">
                   <div className="cursor-pointer">
                     <MdAddIcCall title="Voice Call" />
                   </div>
@@ -201,6 +229,12 @@ const Home = () => {
 
 
       </div>
+      <GroupEditOrViewModal
+        isOpen={isModalOpen}
+        onClose={() => setModalOpen(false)}
+        isGroup={isGroup}
+        data={data}
+      />
     </div>
   )
 }

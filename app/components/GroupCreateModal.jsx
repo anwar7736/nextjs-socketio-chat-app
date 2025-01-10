@@ -6,7 +6,7 @@ import { auth, causer_id, getImageURL, socket_connection } from "../helpers/help
 import { setCookie } from "cookies-next";
 import { AuthContext } from "../contexts/AuthContext";
 const socket = socket_connection();
-const AddGroupModal = ({ isOpen, onClose }) => {
+const GroupCreateModal = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
   const {
     register,
@@ -265,4 +265,4 @@ const AddGroupModal = ({ isOpen, onClose }) => {
   );
 };
 
-export default AddGroupModal;
+export default GroupCreateModal;

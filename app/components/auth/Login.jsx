@@ -6,9 +6,11 @@ import { toast } from "react-toastify";
 import { useContext } from "react";
 import { AuthContext } from "@/app/contexts/AuthContext";
 import { auth } from "@/app/helpers/helper";
+import { UserContext } from "@/app/contexts/UserContext";
 const Login = () => {
     const router = useRouter();
     const {user, setUser} = useContext(AuthContext);
+    const { user: selectedUser, setUser: setSelectedUser } = useContext(UserContext);
     const {
         register,
         handleSubmit,
@@ -35,6 +37,7 @@ const Login = () => {
         {
             delete res.data.password;
             setCookie('auth', JSON.stringify(res.data));
+            setSelectedUser('');
             setUser(auth());
             let redirectUrl = "/";
             router.push(redirectUrl);

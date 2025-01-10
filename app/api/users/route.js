@@ -81,12 +81,31 @@ export async function GET(request) {
                             as: "members"
                         }
                     },
+                    {
+                        $match: {
+                            members: {
+                                $elemMatch: {
+                                    user_id: new mongoose.Types.ObjectId(auth_id),
+                                    status: 1 // Active member
+                                }
+                            }
+                        }
+                    },
                     // Add a stage to count the total group members
                     {
                         $addFields: {
-                            total_members: { $size: "$members" } // Count total members in the group
+                            total_members: {
+                                $size: {
+                                    $filter: {
+                                        input: "$members",
+                                        as: "member",
+                                        cond: { $eq: ["$$member.status", 1] }
+                                    }
+                                }
+                            }
                         }
                     },
+            
                     {
                         $lookup: {
                             from: "message_logs",

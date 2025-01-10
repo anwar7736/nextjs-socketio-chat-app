@@ -95,3 +95,15 @@ export async function PUT(request, content) {
     return NextResponse.json({ success, data, message });
 
 }
+
+export async function GET(request, content) {
+    let id = content.params.id;
+    let success = false;
+    let data = [];
+    data = await userSchema.findById(id);
+    if (data) {
+        success = true;
+    }
+
+    return NextResponse.json({ success, data });
+}

@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 import { MdAdd } from 'react-icons/md';
 import ProfileModal from './ProfileModal';
 import { AuthContext } from '../contexts/AuthContext';
-import AddGroupModal from './AddGroupModal';
+import GroupCreateModal from './GroupCreateModal';
 let socket = socket_connection();
 
 const Sidebar = ({ search, setSearch, activeUsers }) => {
@@ -101,7 +101,7 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
                 isOpen={isProfileModalOpen}
                 onClose={() => setProfileModalOpen(false)}
             />
-            <AddGroupModal
+            <GroupCreateModal
                 isOpen={isAddGroupModalOpen}
                 onClose={() => setAddGroupModalOpen(false)}
             />
