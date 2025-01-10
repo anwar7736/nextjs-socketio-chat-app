@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useState } from "react";
 import ValidationError from "./ValidationError";
 import { useForm } from "react-hook-form";
 import { toast } from "react-toastify";
-import { auth, causer_id, dateFormat, dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
+import { auth, dateFormat, dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
 import { setCookie } from "cookies-next";
 import { AuthContext } from "../contexts/AuthContext";
 const socket = socket_connection();
@@ -22,37 +22,71 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   const [parent, setParent] = useState(false);
   const { user, setUser } = useContext(AuthContext);
 
-  const editGroupFormHandler = async (data) => {
+  const editGroupFormHandler = async (input) => {
     const filteredUsers = users.filter(user => user?.is_checked);
     if (filteredUsers.length === 0) {
       toast.error('Please choose atleast one member!');
       return;
     }
-    // const adminUsers = filteredUsers.filter(user => user?.is_admin);
-    // if(adminUsers.length === 0){
-    //   toast.error('Please choose atleast one admin!');
-    //   return;
-    // }
+    const adminUsers = filteredUsers.filter(user => user?.is_admin);
+    if(adminUsers.length === 0){
+      toast.error('Please choose atleast one admin!');
+      return;
+    }
 
-    const authUser = [{ user_id: causer_id(), is_admin: true }];
-    const selectedUsers = filteredUsers.map(({ user_id, is_admin }) => ({ user_id, is_admin }));
-    const groupMembers = [...authUser, ...selectedUsers];
+    const groupMembers = filteredUsers.map(({ user_id, is_admin }) => ({ user_id, is_admin }));
 
     let formData = new FormData();
-    formData.append('name', data.name);
-    formData.append('short_desc', data.short_desc);
+    formData.append('group_id', data._id);
+    formData.append('name', input.name);
+    formData.append('short_desc', input.short_desc);
     formData.append('photo', photo);
-    formData.append('created_by', causer_id());
+    formData.append('old_photo', data.photo);
     formData.append('group_members', JSON.stringify(groupMembers));
+    formData.append('created_by', JSON.stringify(auth()?._id));
+    formData.append('creator', JSON.stringify(auth()?.name));
     let res = await fetch("api/group", {
-      method: "POST",
+      method: "PUT",
       body: formData
     });
 
     res = await res.json();
     if (res.success) {
       toast.success(res.message);
-      socket.emit("add-group", JSON.stringify(res.data));
+      socket.emit("update-group", JSON.stringify(res.data));
+      onClose();
+    }
+    else {
+      toast.error(res.message);
+    }
+  }
+  
+  const handleLeaveGroup = async () =>{
+    let res = await fetch(`api/group`, {
+      method: "PATCH",
+      body: JSON.stringify({group_id: data._id, user_id: auth()?._id})
+    });
+
+    res = await res.json();
+    if (res.success) {
+      toast.success(res.message);
+      socket.emit("leave-group", JSON.stringify(res.group_id));
+      onClose();
+    }
+    else {
+      toast.error(res.message);
+    }
+  }
+
+  const handleDeleteGroup = async () =>{
+    let res = await fetch(`api/group?id=${data._id}`, {
+      method: "DELETE"
+    });
+
+    res = await res.json();
+    if (res.success) {
+      toast.success(res.message);
+      socket.emit("delete-group", JSON.stringify(res.group_id));
       onClose();
     }
     else {
@@ -275,11 +309,11 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             </div>
 
             <div className="flex justify-end mt-6 space-x-3 flex">
-              <button className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button">
+              <button className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onClick={handleLeaveGroup}>
                 Leave From Group
               </button>
               {
-                data?.is_admin ? <><button className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button">
+                data?.is_admin ? <><button className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onClick={handleDeleteGroup}>
                   Delete Group
                 </button>
                 <button className="bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
@@ -289,7 +323,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-300"
+                className="px-4 py-2 bg-black text-white rounded"
                 title="Close"
               >
                 Close
