@@ -17,7 +17,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
   } = useForm();
   const [preview, setPreview] = useState(null);
   const [photo, setPhoto] = useState(null);
-  const {user, setUser} = useContext(AuthContext);
+  const { user, setUser } = useContext(AuthContext);
 
   const profileFormHandler = async (data) => {
     let formData = new FormData();
@@ -48,7 +48,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
   }
 
   const handlePhotoChange = (file) => {
-    if(!file){
+    if (!file) {
       setPreview('');
       setPhoto('');
       return;
@@ -94,10 +94,10 @@ const ProfileModal = ({ isOpen, onClose }) => {
         </button>
 
 
-        <div align="center">
-          <h1 className="font-bold">MY PROFILE</h1>
-          <div className="w-full max-w-xs">
-            <form className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" onSubmit={handleSubmit(profileFormHandler)}>
+        <form className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" onSubmit={handleSubmit(profileFormHandler)}>
+          <div align="center">
+            <h1 className="font-bold">MY PROFILE</h1>
+            <div className="w-full max-w-xs">
               <div className="mb-4">
                 <label className="block text-gray-700 text-sm font-bold mb-2 text-start" htmlFor="name">
                   Name
@@ -160,24 +160,21 @@ const ProfileModal = ({ isOpen, onClose }) => {
               <div className="mb-6">
                 <img src={preview} alt="Profile Photo" height={150} width={150} />
               </div>
-              <div className="flex items-center justify-between">
-                <button className="bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
-                  Update Now
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
-
-        <div className="flex justify-end mt-6 space-x-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-300"
-            title="Close"
-          >
-            Close
-          </button>
-        </div>
+          <div className="flex justify-end mt-6 space-x-3">
+            <button className="bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+              Update Now
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-300"
+              title="Close"
+            >
+              Close
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

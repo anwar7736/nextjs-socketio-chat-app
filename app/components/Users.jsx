@@ -30,7 +30,8 @@ const Users = ({ activeUsers }) => {
           <div className="flex-1">
               <div className="flex">
                   <div className="font-semibold cursor-pointer">
-                      <span className="ml-1 text-xs">{u?.name}</span>
+                  <span className="ml-1 text-xs flex items-center justify-center">{u?.name}</span>
+
                       {
                         activeUsers.includes(u?._id) && (<sup className="p-1 bg-green-500 ml-1 rounded" style={{ fontSize: "0px", marginBottom:"10px" }}></sup>)
                       }

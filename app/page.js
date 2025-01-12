@@ -11,19 +11,28 @@ import { UserListContext } from './contexts/UserListContext';
 import GroupEditOrViewModal from './components/GroupEditOrViewModal';
 import { toast } from 'react-toastify';
 import { AuthContext } from './contexts/AuthContext';
+import Picker from "emoji-picker-react";
 let socket = socket_connection();
 const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
   const [activeUsers, setActiveUsers] = useState([]);
   const { user, setUser } = useContext(UserContext)
-  const { user:authUser, setUser:setAuthUser } = useContext(AuthContext)
+  // const { user: authUser, setUser: setAuthUser } = useContext(AuthContext)
   const { messages, setMessages } = useContext(MessageContext);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const [isModalOpen, setModalOpen] = useState(false);
   const [data, setData] = useState('');
+  const [showPicker, setShowPicker] = useState(false);
+  const authUser = auth();
+  const onEmojiClick = (emojiObject) => {
+    setMessage((msg) => msg + emojiObject.emoji);
+    setShowPicker(false);
+  };
+
+
   const getUserList = async () => {
-    let res = await fetch(`/api/users?auth_id=${authUser?._id}&search=${search}`);
+    let res = await fetch(`/api/users?auth_id=${authUser._id}&search=${search}`);
     res = await res.json();
     if (res.success) {
       setUsers(res.data);
@@ -92,8 +101,7 @@ const Home = () => {
     socket.off('new-user');
     socket.on('new-user', (data) => {
       getUserList();
-      if(data?._id !== authUser?._id)
-      {
+      if (data?._id !== authUser?._id) {
         toast.success(data?.message);
       }
     });
@@ -123,8 +131,7 @@ const Home = () => {
       });
 
       setMessages(filterMessages);
-      if(data?._id !== authUser?._id)
-      {
+      if (data?._id !== authUser?._id) {
         toast.success(data?.message);
       }
 
@@ -151,8 +158,7 @@ const Home = () => {
       let newUsers = [...users, newUser];
 
       setUsers(newUsers);
-      if(data?.created_by !== authUser?._id)
-      {
+      if (data?.created_by !== authUser?._id) {
         toast.success(data?.message);
       }
     });
@@ -161,19 +167,16 @@ const Home = () => {
     socket.on('update-group', (data) => {
       setModalOpen(false);
       console.log(data)
-      if(data?.res?.status === 0)
-      {
+      if (data?.res?.status === 0) {
         let newUsers = users.filter(user => user._id !== data?._id);
         setUsers(newUsers);
-        if(user._id === data?._id)
-        {
+        if (user._id === data?._id) {
           setUser('');
           setMessages([]);
         }
       }
 
-      if(data?.res?.status === 1)
-      {
+      if (data?.res?.status === 1) {
         let newUser = {
           _id: data?._id,
           name: data?.name,
@@ -182,47 +185,42 @@ const Home = () => {
           is_group: 1,
           total_members: data?.total_members
         };
-  
+
         let newUsers = [...users, newUser];
-  
+
         setUsers(newUsers);
       }
-      if(user._id !== data?._id)
-      {
+      if (user._id !== data?._id) {
         toast.success(data?.res?.message);
       }
-      
+
     });
 
     socket.off('delete-group');
     socket.on('delete-group', (data) => {
       setModalOpen(false);
-      if(user._id === data?._id)
-      {
+      if (user._id === data?._id) {
         setUser('');
         setMessages([]);
       }
       let newUsers = users.filter(user => user._id !== data?._id);
       setUsers(newUsers);
-      if(data.deleted_by !== authUser._id)
-      {
+      if (data.deleted_by !== authUser._id) {
         toast.success(data?.message);
       }
     });
 
     socket.off('leave-group');
     socket.on('leave-group', (res) => {
-      if(user._id === res?._id)
-      {
-        setUser({...user, total_members: user.total_members - 1});
-        if(isModalOpen){
+      if (user._id === res?._id) {
+        setUser({ ...user, total_members: user.total_members - 1 });
+        if (isModalOpen) {
           let newMembers = data?.members?.filter(m => m.user_id !== res?.user_id);
-          setData({...data, members:newMembers});
+          setData({ ...data, members: newMembers });
         }
       }
 
-      if(res?.user_id !== authUser?._id)
-      {
+      if (res?.user_id !== authUser?._id) {
         toast.success(res?.message);
       }
     });
@@ -269,8 +267,8 @@ const Home = () => {
               <header className="bg-white p-4 text-gray-700 flex justify-between">
                 <div className="text-xl font-semibold cursor-pointer flex" onClick={handleEditOrViewModal}>
 
-                  <img src={getImageURL(user?.photo)} height={40} width={40} className="border-2 border-red-400 rounded-full" title={user?.name} />
-                  <span className="ml-2 mt-2">{user?.name} {user?.total_members > 0 ? `(${user?.total_members})` : null}</span>
+                  <img src={getImageURL(user?.photo)} height={40} width={40} className="border-2 border-red-400 rounded-full w-10 h-10" title={user?.name} />
+                  <span className="mt-2 text-sm xs:text-sm sm:text-md md:text-lg lg:text-lg xl:text-lg font-semibold px-1">{user?.name} {user?.total_members > 0 ? `(${user?.total_members})` : null}</span>
                   {
                     activeUsers.includes(user?._id) && (<sup className="p-1 bg-green-500 rounded" style={{ height: "0px", marginTop: "10px" }}></sup>)
                   }
@@ -296,8 +294,52 @@ const Home = () => {
               <form method="POST" onSubmit={sendMessage}>
                 <footer className="bg-white border-t border-gray-300 p-4 absolute bottom-0 w-4/6">
                   <div className="flex items-center gap-x-2">
-                    <input type="text" placeholder="Type a message..." className="w-full p-2 rounded-md border border-gray-400 focus:outline-none focus:border-blue-500" onChange={(e) => setMessage(e.target.value)} value={message} />
-                    <button type="submit" className={`${message.trim()?.length > 0 ? 'bg-indigo-500' : 'bg-indigo-200 cursor-not-allowed'} text-white px-4 py-2 rounded-md mr-6`} disabled={message.trim().length === 0} title={message.trim().length > 0 ? 'Send' : ''}>Send</button>
+                    <div className="relative w-full">
+                      <div className="relative w-full">
+                        {/* Input and Send Button Wrapper */}
+                        <div className="flex items-center">
+                          <div className="relative flex-grow">
+                            <input
+                              type="text"
+                              placeholder="Type a message..."
+                              className="w-full p-2 pr-10 rounded-md border border-gray-400 focus:outline-none focus:border-blue-500"
+                              onChange={(e) => setMessage(e.target.value)}
+                              value={message}
+                            />
+                            {/* Emoji Picker Icon */}
+                            <img
+                              className="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer"
+                              title="Choose emoji"
+                              src="https://icons.getbootstrap.com/assets/icons/emoji-smile.svg"
+                              onClick={() => setShowPicker((val) => !val)}
+                              alt="Emoji Picker"
+                            />
+                          </div>
+                          {/* Send Button */}
+                          <button
+                            type="submit"
+                            className={`ml-3 ${message.trim()?.length > 0 ? 'bg-indigo-500' : 'bg-indigo-200 cursor-not-allowed'
+                              } text-white px-4 py-2 rounded-md`}
+                            disabled={message.trim().length === 0}
+                            title={message.trim().length > 0 ? 'Send' : ''}
+                          >
+                            Send
+                          </button>
+                        </div>
+
+                        {/* Emoji Picker */}
+                        {showPicker && (
+                          <div className="left-0 w-full mt-2 z-10">
+                            <Picker
+                              pickerStyle={{ width: "100%" }}
+                              onEmojiClick={onEmojiClick}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+
                   </div>
                 </footer>
               </form>

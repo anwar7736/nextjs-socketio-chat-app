@@ -24,7 +24,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   const [search, setSearch] = useState('');
   const [parent, setParent] = useState(false);
   const { user, setUser } = useContext(AuthContext);
-  const { user:selectedUser, setUser: setSelectedUser } = useContext(UserContext);
+  const { user: selectedUser, setUser: setSelectedUser } = useContext(UserContext);
   const { users: userList, setUsers: setUserList } = useContext(UserListContext);
   const { messages, setMessages } = useContext(MessageContext);
 
@@ -35,7 +35,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
       return;
     }
     const adminUsers = filteredUsers.filter(user => user?.is_admin);
-    if(adminUsers.length === 0){
+    if (adminUsers.length === 0) {
       toast.error('Please choose atleast one admin!');
       return;
     }
@@ -58,7 +58,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
 
     res = await res.json();
     if (res.success) {
-      setSelectedUser({...selectedUser, total_members: res?.data?.total_members});
+      setSelectedUser({ ...selectedUser, total_members: res?.data?.total_members });
       toast.success(res.message);
       socket.emit("update-group", JSON.stringify(res.data));
       onClose();
@@ -67,20 +67,18 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
       toast.error(res.message);
     }
   }
-  
-  const handleLeaveGroup = async () =>{
-    if(data?.is_admin)
-    {
+
+  const handleLeaveGroup = async () => {
+    if (data?.is_admin) {
       const adminUsers = users.filter(u => u?.is_checked && u?.is_admin && u?.user_id !== user?._id);
-      if(adminUsers.length === 0)
-      {
+      if (adminUsers.length === 0) {
         toast.error('Please choose atleast one admin!');
       }
       return;
     }
     let res = await fetch(`api/group`, {
       method: "PATCH",
-      body: JSON.stringify({group_id: data._id, user_id: user?._id})
+      body: JSON.stringify({ group_id: data._id, user_id: user?._id })
     });
 
     res = await res.json();
@@ -90,7 +88,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
       setSelectedUser('');
       setMessages([]);
       toast.success(`You are left from "${data.name}"`);
-      const response = {_id: data._id, user_id: user._id, message: `${user.name} left from "${data.name}"`};
+      const response = { _id: data._id, user_id: user._id, message: `${user.name} left from "${data.name}"` };
       socket.emit("leave-group", JSON.stringify(response));
       onClose();
     }
@@ -99,7 +97,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     }
   }
 
-  const handleDeleteGroup = async () =>{
+  const handleDeleteGroup = async () => {
     let res = await fetch(`api/group?id=${data._id}`, {
       method: "DELETE"
     });
@@ -107,7 +105,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     res = await res.json();
     if (res.success) {
       toast.success(res.message);
-      const response = {_id: data._id, deleted_by: user._id, message: `"${data?.name}" deleted by ${user.name}`};
+      const response = { _id: data._id, deleted_by: user._id, message: `"${data?.name}" deleted by ${user.name}` };
       socket.emit("delete-group", JSON.stringify(response));
       onClose();
     }
@@ -161,8 +159,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     res = await res.json();
     if (res.success) {
       let updatedUsers = [];
-      if(data?.is_admin)
-      {
+      if (data?.is_admin) {
         updatedUsers = res.data.map(user => ({
           ...user,
           is_checked: data?.members?.some(m => m.user_id === user.user_id),
@@ -171,10 +168,10 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
           createdAt: data?.members?.filter(m => m.user_id === user.user_id).map(m => m.createdAt),
         }));
       }
-      else{
+      else {
         updatedUsers = res.data.filter(user => data?.members?.some(m => m.user_id === user.user_id));
       }
-      
+
       setUsers(updatedUsers);
       const is_checked = updatedUsers.every(user => user?.is_checked);
       setParent(is_checked);
@@ -313,8 +310,8 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
                               <td className="px-6 py-4">
                                 <p>{user?.name}</p>
                                 {user?.creator ? <h6 className="text-xs">Created By : {user?.creator}</h6> : ""}
-                                {user?.createdAt ? <h6 className="text-xs">Created At : {dateFormat( user?.createdAt)}</h6> : ""}
-                                </td>
+                                {user?.createdAt ? <h6 className="text-xs">Created At : {dateFormat(user?.createdAt)}</h6> : ""}
+                              </td>
                               <td className="px-6 py-4">
                                 {data?.is_admin ? (
                                   <input
@@ -336,29 +333,45 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
               </div>
             </div>
 
-            <div className="flex justify-end mt-6 space-x-3 flex">
-              <button className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onClick={handleLeaveGroup}>
+            <div className="flex justify-end mt-6 space-x-3">
+              <button
+                className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline"
+                type="button"
+                onClick={handleLeaveGroup}
+              >
                 Leave From Group
               </button>
-              {
-                data?.is_admin ? <><button className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onClick={handleDeleteGroup}>
-                  Delete Group
-                </button>
-                <button className="bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
-                  Update Group
-                </button></> : null
-              }
+              {data?.is_admin ? (
+                <>
+                  <button
+                    className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline"
+                    type="button"
+                    onClick={handleDeleteGroup}
+                  >
+                    Delete Group
+                  </button>
+                  <button
+                    className="bg-green-500 hover:bg-blue-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline"
+                    type="submit"
+                  >
+                    Update Group
+                  </button>
+                </>
+              ) : null}
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 bg-black text-white rounded"
+                className="bg-black text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline"
                 title="Close"
               >
                 Close
               </button>
             </div>
+
+
           </div>
         </div>
+
       </form>
       ) :
       (

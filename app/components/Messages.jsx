@@ -57,16 +57,16 @@ const Messages = () => {
                     const receiver = data?.receiver;
                         return (receiver?._id == user?._id && data?.status == 2)
                         ? ""
-                    : (<div key={data?._id} title="double click to remove" onDoubleClick={(e) => handleRemoveMsg(data)}>
+                    : (<div key={data?._id}>
                         {
                             sender?._id == user?._id
                                 ?
                                 (<div className="mb-3">
-                                    <div className="flex justify-end mb-1 cursor-pointer">
-                                        <div className="flex max-w-96 bg-indigo-500 text-white rounded-lg p-3 gap-3">
+                                    <div className="flex justify-end mb-1">
+                                        <div className="flex max-w-96 bg-indigo-500 text-white rounded-lg p-3 gap-3 cursor-pointer" title="double click to remove" onDoubleClick={(e) => handleRemoveMsg(data)}>
                                             <p>{data?.message?.message}</p>
                                         </div>
-                                        <div className="w-9 h-9 rounded-full flex items-center justify-center ml-2">
+                                        <div className="w-9 h-9 rounded-full flex items-center justify-center ml-2 cursor-pointer">
                                             <img src={getImageURL(user?.photo)} alt="My Avatar" className="border-2 border-red-400 w-8 h-8 rounded-full" title={user?.name} />
 
                                         </div>
@@ -79,11 +79,11 @@ const Messages = () => {
                                     <div className="mb-3">
                                         <div align="left" className="text-xs text-gray-500 ml-10">{sender?.name}
                                         </div>
-                                        <div className="flex mb-1 cursor-pointer">
-                                            <div className="w-9 h-9 rounded-full flex items-center justify-center mr-2">
+                                        <div className="flex mb-1">
+                                            <div className="w-9 h-9 rounded-full flex items-center justify-center mr-2 cursor-pointer">
                                                 <img src={getImageURL(sender?.photo)} alt="User Avatar" className="border-2 border-red-400 w-8 h-8 rounded-full" title={sender?.name}/>
                                             </div>
-                                            <div className="flex max-w-96 bg-white rounded-lg p-3 gap-3">
+                                            <div className="flex max-w-96 bg-white rounded-lg p-3 gap-3 cursor-pointer" title="double click to remove" onDoubleClick={(e) => handleRemoveMsg(data)}>
                                                 <p className="text-gray-700">{data?.message?.message}</p>
                                             </div>
                                         </div>
