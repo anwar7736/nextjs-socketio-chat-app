@@ -40,24 +40,33 @@ export async function GET(request) {
         { $set: { status: 1 } }
       );
 
-      match = {
-        $match: {
-          $or: [
-            { group_id: null },
-            { group_id: { $exists: false } }
-          ],
-          $or: [
-            {
-              sender_id: authObjectId,
-              receiver_id: refObjectId
-            },
-            {
-              sender_id: refObjectId,
-              receiver_id: authObjectId
-            }
-          ]
-        }
-      };
+		match = {
+		  $match: {
+			$and: [
+			  // Ensure this is always satisfied (for private messages)
+			  {
+				$or: [
+				  { group_id: null },
+				  { group_id: { $exists: false } }
+				]
+			  },
+			  // One of these must also be true (private message participants)
+			  {
+				$or: [
+				  {
+					sender_id: authObjectId,
+					receiver_id: refObjectId
+				  },
+				  {
+					sender_id: refObjectId,
+					receiver_id: authObjectId
+				  }
+				]
+			  }
+			]
+		  }
+		};
+
     }
 
     const data = await messageLogSchema.aggregate([
