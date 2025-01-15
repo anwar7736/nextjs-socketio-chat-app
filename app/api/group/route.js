@@ -343,7 +343,7 @@ export async function DELETE(request) {
     let message = "";
     let groupMembers = [];
     try {
-        groupMembers = await groupMemberSchema.find({ group_id, status: { $eq: 1 } });
+        groupMembers = await groupMemberSchema.find({ group_id: _id, status: { $eq: 1 } });
         const membersDeleted = await groupMemberSchema.deleteMany({ group_id: _id });
         if (membersDeleted.deletedCount > 0) {
             const groupDeleted = await groupSchema.deleteOne({ _id });
@@ -358,7 +358,7 @@ export async function DELETE(request) {
             message = "No members found for this group.";
         }
     } catch (error) {
-        message = "An error occurred while deleting the group.";
+        message = `An error occurred while deleting the group.${error}`;
     }
 
     return NextResponse.json({ success, message, groupMembers });

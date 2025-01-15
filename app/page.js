@@ -70,12 +70,9 @@ const Home = () => {
   const loadRealTimeMessages = () => {
     socket.off('private-message');
     socket.on('private-message', async (data) => {
-      console.log(data);
       if ((data?.is_group == 1 && user?._id == data?.receiver_id) || (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
         (data?.sender_id == user?._id && data?.receiver_id == authUser?._id)) {
         let res = await loadMessages(user);
-        console.log(res);
-
         setMessages(res);
       }
       else if (data?.receiver_id == authUser?._id || data?.is_group == 1) {
@@ -166,7 +163,6 @@ const Home = () => {
     socket.off('update-group');
     socket.on('update-group', (data) => {
       setModalOpen(false);
-      console.log(data)
       if (data?.res?.status === 0) {
         let newUsers = users.filter(user => user._id !== data?._id);
         setUsers(newUsers);
@@ -240,7 +236,6 @@ const Home = () => {
         res.data.is_admin = res.data.members.some(
           (member) => member.is_admin === 1 && member.user_id === authUser._id
         );
-        console.log(res.data);
         setData(res.data);
       }
     }

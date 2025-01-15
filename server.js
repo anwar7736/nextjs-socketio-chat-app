@@ -41,7 +41,7 @@ const io = new Server(server,{
 
       socket.on('message-deleted', (data) => {
         const parsedData = JSON.parse(data);
-        io.to(users[parsedData?.receiver[0]?._id]).emit('message-deleted', parsedData);
+        io.to(users[parsedData?.receiver?._id]).emit('message-deleted', parsedData);
       });
 
       socket.on('add-group', (data) => {
@@ -53,7 +53,6 @@ const io = new Server(server,{
       
       socket.on('update-group', (data) => {
         const parsedData = JSON.parse(data);
-        console.log(parsedData)
         parsedData?.response?.map(res => {
             io.to(users[res.user_id]).emit('update-group', {...parsedData, res});
         });

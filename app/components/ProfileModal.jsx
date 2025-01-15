@@ -17,9 +17,11 @@ const ProfileModal = ({ isOpen, onClose }) => {
   } = useForm();
   const [preview, setPreview] = useState(null);
   const [photo, setPhoto] = useState(null);
+  const [isDisabled, setIsDisabled] = useState(false);
   const { user, setUser } = useContext(AuthContext);
 
   const profileFormHandler = async (data) => {
+    setIsDisabled(true);
     let formData = new FormData();
     formData.append('name', data.name);
     formData.append('phone', data.phone);
@@ -34,6 +36,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
     });
 
     res = await res.json();
+    setIsDisabled(false);
     if (res.success) {
       res.data.message = `${user.name} updated his profile.`;
       socket.emit("user-updated", JSON.stringify(res.data));
@@ -163,7 +166,11 @@ const ProfileModal = ({ isOpen, onClose }) => {
             </div>
           </div>
           <div className="flex justify-end mt-6 space-x-3">
-            <button className="bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+            <button
+              disabled={isDisabled}
+              className={`bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                }`}
+              type="submit">
               Update Now
             </button>
             <button

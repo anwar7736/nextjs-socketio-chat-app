@@ -20,12 +20,15 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [parent, setParent] = useState(false);
+  const [isDisabled, setIsDisabled] = useState(false);
   const { user, setUser } = useContext(AuthContext);
 
   const addGroupFormHandler = async (data) => {
+    setIsDisabled(true);
     const filteredUsers = users.filter(user => user?.is_checked);
-    if(filteredUsers.length === 0){
+    if (filteredUsers.length === 0) {
       toast.error('Please choose atleast one member!');
+      setIsDisabled(false);
       return;
     }
     // const adminUsers = filteredUsers.filter(user => user?.is_admin);
@@ -34,10 +37,10 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     //   return;
     // }
 
-    const authUser = [{user_id:causer_id(), is_admin:true}];
-    const selectedUsers = filteredUsers.map(({user_id, is_admin}) => ({user_id, is_admin}));
+    const authUser = [{ user_id: causer_id(), is_admin: true }];
+    const selectedUsers = filteredUsers.map(({ user_id, is_admin }) => ({ user_id, is_admin }));
     const groupMembers = [...authUser, ...selectedUsers];
-    
+
     let formData = new FormData();
     formData.append('name', data.name);
     formData.append('short_desc', data.short_desc);
@@ -57,6 +60,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
       onClose();
     }
     else {
+      setIsDisabled(false);
       toast.error(res.message);
     }
   }
@@ -74,7 +78,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
 
   const handleParentChange = (is_checked) => {
     setParent(is_checked);
-    const updatedUsers = users.map(user => ({...user, is_checked}));
+    const updatedUsers = users.map(user => ({ ...user, is_checked }));
     setUsers(updatedUsers);
   }
 
@@ -82,9 +86,9 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     const updatedUsers = users.map(user =>
       user?.user_id === user_id ? { ...user, is_checked: !user?.is_checked } : user
     );
-  
+
     setUsers(updatedUsers);
-  
+
     const is_checked = updatedUsers.every(user => user?.is_checked);
     setParent(is_checked);
   };
@@ -93,10 +97,10 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     const updatedUsers = users.map(user =>
       user?.user_id === user_id ? { ...user, is_admin: !user?.is_admin } : user
     );
-  
+
     setUsers(updatedUsers);
   };
-  
+
 
   useEffect(() => {
     loadUsers();
@@ -225,7 +229,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
                               </div>
                             </td>
                             <td className="px-6 py-4">
-                              <img src={getImageURL(user?.photo)} alt={user?.name} height={40} width={40} className="rounded-full border-2 border-red-400"/>
+                              <img src={getImageURL(user?.photo)} alt={user?.name} height={40} width={40} className="rounded-full border-2 border-red-400" />
                             </td>
                             <td className="px-6 py-4">{user?.name}</td>
                             <td className="px-6 py-4">
@@ -247,7 +251,11 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
           </div>
 
           <div className="flex justify-end mt-6 space-x-3 flex">
-            <button className="bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+            <button
+              disabled={isDisabled}
+              className={`bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                }`}
+              type="submit">
               Create Now
             </button>
             <button

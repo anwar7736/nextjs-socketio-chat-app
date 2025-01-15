@@ -12,6 +12,7 @@ import {
   socket_connection,
 } from "../helpers/helper";
 import ValidationError from "./ValidationError";
+import Swal from "sweetalert2";
 const socket = socket_connection();
 const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   if (!isOpen) return null;
@@ -27,6 +28,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [parent, setParent] = useState(false);
+  const [isDisabled, setIsDisabled] = useState(false);
   const { user, setUser } = useContext(AuthContext);
   const { user: selectedUser, setUser: setSelectedUser } =
     useContext(UserContext);
@@ -35,14 +37,17 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   const { messages, setMessages } = useContext(MessageContext);
 
   const editGroupFormHandler = async (input) => {
+    setIsDisabled(true);
     const filteredUsers = users.filter((user) => user?.is_checked);
     if (filteredUsers.length === 0) {
       toast.error("Please choose atleast one member!");
+      setIsDisabled(false);
       return;
     }
     const adminUsers = filteredUsers.filter((user) => user?.is_admin);
     if (adminUsers.length === 0) {
       toast.error("Please choose atleast one admin!");
+      setIsDisabled(false);
       return;
     }
 
@@ -75,62 +80,105 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
       socket.emit("update-group", JSON.stringify(res.data));
       onClose();
     } else {
+      setIsDisabled(false);
       toast.error(res.message);
     }
   };
 
   const handleLeaveGroup = async () => {
+    setIsDisabled(true);
     if (data?.is_admin) {
       const adminUsers = users.filter(
         (u) => u?.is_checked && u?.is_admin && u?.user_id !== user?._id
       );
       if (adminUsers.length === 0) {
         toast.error("Please choose atleast one admin!");
+        setIsDisabled(false);
+        return;
       }
-      return;
     }
-    let res = await fetch(`api/group`, {
-      method: "PATCH",
-      body: JSON.stringify({ group_id: data._id, user_id: user?._id }),
-    });
 
-    res = await res.json();
-    if (res.success) {
-      let newUsers = userList.filter((user) => user._id !== data?._id);
-      setUserList(newUsers);
-      setSelectedUser("");
-      setMessages([]);
-      toast.success(`You are left from "${data.name}"`);
-      const response = {
-        _id: data._id,
-        user_id: user._id,
-        message: `${user.name} left from "${data.name}"`,
-      };
-      socket.emit("leave-group", JSON.stringify(response));
-      onClose();
-    } else {
-      toast.error(res.message);
-    }
+    Swal.fire({
+      title: "Are you sure?",
+      text: "You won't be able to leave this group!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#3085d6",
+      cancelButtonColor: "#d33",
+      confirmButtonText: "Yes",
+      cancelButtonText: "No"
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        let res = await fetch(`api/group`, {
+          method: "PATCH",
+          body: JSON.stringify({ group_id: data._id, user_id: user?._id }),
+        });
+
+        res = await res.json();
+        if (res.success) {
+          let newUsers = userList.filter((user) => user._id !== data?._id);
+          setUserList(newUsers);
+          setSelectedUser("");
+          setMessages([]);
+          toast.success(`You are left from "${data.name}"`);
+          const response = {
+            _id: data._id,
+            user_id: user._id,
+            message: `${user.name} left from "${data.name}"`,
+            groupMembers: res?.groupMembers,
+          };
+          socket.emit("leave-group", JSON.stringify(response));
+          onClose();
+        } else {
+          setIsDisabled(false);
+          toast.error(res.message);
+        }
+
+      }
+    });
+    setIsDisabled(false);
   };
 
   const handleDeleteGroup = async () => {
-    let res = await fetch(`api/group?id=${data._id}`, {
-      method: "DELETE",
-    });
+    setIsDisabled(true);
+    Swal.fire({
+      title: "Are you sure?",
+      text: "You won't be able to delete this group!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#3085d6",
+      cancelButtonColor: "#d33",
+      confirmButtonText: "Yes",
+      cancelButtonText: "No"
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        let res = await fetch(`api/group?id=${data?._id}`, {
+          method: "DELETE",
+        });
 
-    res = await res.json();
-    if (res.success) {
-      toast.success(res.message);
-      const response = {
-        _id: data._id,
-        deleted_by: user._id,
-        message: `"${data?.name}" deleted by ${user.name}`,
-      };
-      socket.emit("delete-group", JSON.stringify(response));
-      onClose();
-    } else {
-      toast.error(res.message);
-    }
+        res = await res.json();
+        if (res.success) {
+          let newUsers = userList.filter((user) => user._id !== data?._id);
+          setUserList(newUsers);
+          setSelectedUser("");
+          setMessages([]);
+          toast.success(res.message);
+          const response = {
+            _id: data._id,
+            deleted_by: user._id,
+            message: `"${data?.name}" deleted by ${user.name}`,
+            groupMembers: res.groupMembers,
+          };
+          socket.emit("delete-group", JSON.stringify(response));
+          onClose();
+        } else {
+          setIsDisabled(false);
+          toast.error(res.message);
+        }
+
+      }
+    });
+    setIsDisabled(false);
   };
 
   const handlePhotoChange = (file) => {
@@ -189,11 +237,13 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
           ),
           creator: data?.members
             ?.filter((m) => m.user_id === user.user_id)
-            .map((m) => m.creator),
+            .map((m) => m.creator)[0] || null, // Extract the first value or null
           createdAt: data?.members
             ?.filter((m) => m.user_id === user.user_id)
-            .map((m) => m.createdAt),
-        }));
+            .map((m) => m.createdAt)[0] || null, // Extract the first value or null
+        }))
+          .sort((a, b) => (b.is_checked === true) - (a.is_checked === true));;
+
       } else {
         updatedUsers = res.data
           .filter((user) =>
@@ -204,7 +254,15 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             is_admin: data?.members?.some(
               (m) => m.user_id === user.user_id && m.is_admin
             ),
-          }));
+            creator: data?.members
+              ?.filter((m) => m.user_id === user.user_id)
+              .map((m) => m.creator)[0] || null, // Extract the first value or null
+            createdAt: data?.members
+              ?.filter((m) => m.user_id === user.user_id)
+              .map((m) => m.createdAt)[0] || null, // Extract the first value or null
+          }))
+          .sort((a, b) => (b.is_admin === true) - (a.is_admin === true)); // Sort with is_admin: 1 first
+
       }
 
       setUsers(updatedUsers);
@@ -454,7 +512,9 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
 
           <div className="flex justify-end mt-6 space-x-3">
             <button
-              className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline"
+              disabled={isDisabled}
+              className={`bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline ${isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                }`}
               type="button"
               onClick={handleLeaveGroup}
             >
@@ -463,14 +523,18 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             {data?.is_admin ? (
               <>
                 <button
-                  className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline"
+                  disabled={isDisabled}
+                  className={`bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline ${isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                    }`}
                   type="button"
                   onClick={handleDeleteGroup}
                 >
                   Delete Group
                 </button>
                 <button
-                  className="bg-green-500 hover:bg-blue-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline"
+                  disabled={isDisabled}
+                  className={`bg-green-500 hover:bg-blue-700 text-white font-bold py-1 px-2 text-sm md:py-2 md:px-4 rounded focus:outline-none focus:shadow-outline ${isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                    }`}
                   type="submit"
                 >
                   Update Group

@@ -10,6 +10,7 @@ let socket = socket_connection();
 const SignUp = () => {
   const router = useRouter();
   const {user, setUser} = useContext(AuthContext);
+  const [isDisabled, setIsDisabled] = useState(false);
   const {
     register,
     handleSubmit,
@@ -18,6 +19,7 @@ const SignUp = () => {
   } = useForm();
 
   const signupFormHandler = async (data) => {
+    setIsDisabled(true);
     let formData = new FormData();
     formData.append('name', data.name);
     formData.append('phone', data.phone);
@@ -31,6 +33,7 @@ const SignUp = () => {
     });
 
     res = await res.json();
+    setIsDisabled(false);
     if (res.success) {
       delete res.data.password;
       res.data.message = `${res.data.name} registered now.`;
@@ -105,9 +108,14 @@ const SignUp = () => {
             <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline" id="photo" type="file" placeholder="******************" {...register("photo")} />
           </div>
           <div className="flex items-center justify-between">
-            <button className="bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+            <button 
+                disabled={isDisabled}
+                className={`bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                    }`}
+                type="submit">
               Register
             </button>
+            
           </div>
         </form>
       </div>
