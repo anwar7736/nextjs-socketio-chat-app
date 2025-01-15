@@ -53,6 +53,7 @@ const io = new Server(server,{
       
       socket.on('update-group', (data) => {
         const parsedData = JSON.parse(data);
+        console.log(parsedData)
         parsedData?.response?.map(res => {
             io.to(users[res.user_id]).emit('update-group', {...parsedData, res});
         });
@@ -60,12 +61,16 @@ const io = new Server(server,{
 
       socket.on('delete-group', (data) => {
         const parsedData = JSON.parse(data);
-        socket.broadcast.emit('delete-group', parsedData);
+        parsedData?.groupMembers?.map(res => {
+          io.to(users[res.user_id]).emit('delete-group', parsedData);
+      });
       });
 
       socket.on('leave-group', (data) => {
         const parsedData = JSON.parse(data);
-        socket.broadcast.emit('leave-group', parsedData);
+        parsedData?.groupMembers?.map(res => {
+          io.to(users[res.user_id]).emit('leave-group', parsedData);
+      });
       });
 
       socket.on('disconnect', () => {

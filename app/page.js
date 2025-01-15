@@ -190,9 +190,8 @@ const Home = () => {
 
         setUsers(newUsers);
       }
-      if (user._id !== data?._id) {
-        toast.success(data?.res?.message);
-      }
+        
+      toast.success(data?.res?.message);
 
     });
 
@@ -220,9 +219,9 @@ const Home = () => {
         }
       }
 
-      if (res?.user_id !== authUser?._id) {
+      // if (res?.user_id !== authUser?._id) {
         toast.success(res?.message);
-      }
+      // }
     });
 
   };

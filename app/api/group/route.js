@@ -302,6 +302,8 @@ export async function PUT(request) {
             });
         }
 
+        response = response.filter(res => res?.user_id != created_by);
+
         // Finalize the response
         data = {
             _id: group_id,
@@ -309,6 +311,7 @@ export async function PUT(request) {
             photo: inputs.photo,
             total_members: group_members?.length,
             response,
+            causer_id: created_by
         };
     }
 
@@ -329,15 +332,18 @@ export async function PATCH(request) {
         message = "You are left from this group";
     }
 
-    return NextResponse.json({ success, message, group_id });
+    const groupMembers = await groupMemberSchema.find({ group_id, status: { $eq: 1 } });
+
+    return NextResponse.json({ success, message, group_id, groupMembers });
 }
 
 export async function DELETE(request) {
     const _id = request.nextUrl.searchParams.get('id');
     let success = false;
     let message = "";
-
+    let groupMembers = [];
     try {
+        groupMembers = await groupMemberSchema.find({ group_id, status: { $eq: 1 } });
         const membersDeleted = await groupMemberSchema.deleteMany({ group_id: _id });
         if (membersDeleted.deletedCount > 0) {
             const groupDeleted = await groupSchema.deleteOne({ _id });
@@ -355,5 +361,5 @@ export async function DELETE(request) {
         message = "An error occurred while deleting the group.";
     }
 
-    return NextResponse.json({ success, message });
+    return NextResponse.json({ success, message, groupMembers });
 }
