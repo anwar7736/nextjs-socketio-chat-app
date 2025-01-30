@@ -30,8 +30,8 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
     // socket.removeAllListeners();
     // socket.disconnect();
     deleteCookie("auth");
-    // router.push("/auth");
-    window.location.href = "/auth";
+    router.push("/auth");
+    // window.location.href = "/auth";
   };
 
   const handleAddGroupModal = () => {
