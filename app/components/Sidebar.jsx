@@ -26,10 +26,10 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
 
   const logout = () => {
     socket.emit("user-logout", auth()?._id);
-    deleteCookie("auth");
     socket.off();
     socket.removeAllListeners();
     socket.disconnect(true);
+    deleteCookie("auth");
     router.push("/auth");
   };
 
