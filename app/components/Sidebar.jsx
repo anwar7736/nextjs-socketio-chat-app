@@ -29,6 +29,7 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
     deleteCookie("auth");
     socket.off();
     socket.removeAllListeners();
+    socket.disconnect(true);
     router.push("/auth");
   };
 
