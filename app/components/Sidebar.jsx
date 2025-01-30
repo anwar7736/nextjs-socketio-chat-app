@@ -6,7 +6,7 @@ import { IoIosAddCircleOutline, IoMdArrowDropdown } from "react-icons/io";
 import { IoPowerOutline } from "react-icons/io5";
 import { MdAdd } from "react-icons/md";
 import { AuthContext } from "../contexts/AuthContext";
-import { auth, getImageURL, socket_connection } from "../helpers/helper";
+import { getImageURL, socket_connection } from "../helpers/helper";
 import GroupCreateModal from "./GroupCreateModal";
 import ProfileModal from "./ProfileModal";
 import Users from "./Users";
@@ -25,10 +25,10 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
   };
 
   const logout = () => {
-    socket.emit("user-logout", auth()?._id);
-    socket.off();
-    socket.removeAllListeners();
-    socket.disconnect(true);
+    socket.emit("user-logout", user?._id);
+    // socket.off();
+    // socket.removeAllListeners();
+    // socket.disconnect();
     deleteCookie("auth");
     // router.push("/auth");
     window.location.href = "/auth";
