@@ -24,43 +24,14 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
     setIsDropdownOpen(!isDropdownOpen);
   };
 
-  //   const logout = () => {
-  //     if (socket && socket.connected) {
-  //       console.log("Emitting logout event...");
-  //       socket.emit("user-logout", auth()?._id);
-  //       return;
-  //     }
-  //     // socket.emit("user-logout", auth()?._id);
-  //     socket.off();
-  //     socket.removeAllListeners();
-  //     socket.disconnect(true);
-  //     deleteCookie("auth");
-  //     // router.push("/auth");
-  //     window.location.href = "/auth";
-  //   };
-
   const logout = () => {
-    console.log("Logging out...");
-
-    if (socket && socket.connected) {
-      console.log("Emitting logout event...");
-      socket.emit("user-logout", auth()?._id);
-    }
-
-    setTimeout(() => {
-      console.log("Removing all socket listeners...");
-      socket.off(); // Remove event listeners
-      socket.removeAllListeners();
-
-      console.log("Disconnecting socket...");
-      socket.disconnect(true);
-
-      deleteCookie("auth");
-
-      console.log("Redirecting to /auth...");
-      router.push("/auth");
-      //   window.location.href = "/auth"; // Ensure a full page reload
-    }, 500); // Small delay to ensure logout event reaches the server
+    socket.emit("user-logout", auth()?._id);
+    socket.off();
+    socket.removeAllListeners();
+    socket.disconnect(true);
+    deleteCookie("auth");
+    // router.push("/auth");
+    window.location.href = "/auth";
   };
 
   const handleAddGroupModal = () => {
