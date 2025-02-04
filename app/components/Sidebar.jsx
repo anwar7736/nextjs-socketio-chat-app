@@ -25,13 +25,10 @@ const Sidebar = ({ search, setSearch, activeUsers }) => {
   };
 
   const logout = () => {
-    // socket.emit("user-logout", user?._id);
-    // socket.off();
-    // socket.removeAllListeners();
-    // socket.disconnect();
+    const socket = socket_connection();
+    socket.emit("user-logout", user?._id);
     deleteCookie("auth");
-    // router.push("/auth");
-    window.location.href = "/auth";
+    router.push("/auth");
   };
 
   const handleAddGroupModal = () => {

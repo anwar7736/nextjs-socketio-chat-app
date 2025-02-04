@@ -22,7 +22,7 @@ const Login = () => {
     formState: { errors },
   } = useForm({
     defaultValues: {
-      phone: "01794312241",
+      phone: "01794030592",
       password: "1234",
     },
   });

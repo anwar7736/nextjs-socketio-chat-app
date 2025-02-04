@@ -1,28 +1,32 @@
 "use client";
-import { useContext, useEffect, useState } from 'react';
-import Messages from './components/Messages';
-import Sidebar from './components/Sidebar'
+import Picker from "emoji-picker-react";
+import { useContext, useEffect, useState } from "react";
 import { FaVideo } from "react-icons/fa";
 import { MdAddIcCall } from "react-icons/md";
-import { UserContext } from './contexts/UserContext';
-import { MessageContext } from './contexts/MessageContext';
-import { auth, getImageURL, loadMessages, socket_connection } from './helpers/helper';
-import { UserListContext } from './contexts/UserListContext';
-import GroupEditOrViewModal from './components/GroupEditOrViewModal';
-import { toast } from 'react-toastify';
-import { AuthContext } from './contexts/AuthContext';
-import Picker from "emoji-picker-react";
+import { toast } from "react-toastify";
+import GroupEditOrViewModal from "./components/GroupEditOrViewModal";
+import Messages from "./components/Messages";
+import Sidebar from "./components/Sidebar";
+import { MessageContext } from "./contexts/MessageContext";
+import { UserContext } from "./contexts/UserContext";
+import { UserListContext } from "./contexts/UserListContext";
+import {
+  auth,
+  getImageURL,
+  loadMessages,
+  socket_connection,
+} from "./helpers/helper";
 let socket = socket_connection();
 const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
   const [activeUsers, setActiveUsers] = useState([]);
-  const { user, setUser } = useContext(UserContext)
+  const { user, setUser } = useContext(UserContext);
   // const { user: authUser, setUser: setAuthUser } = useContext(AuthContext)
   const { messages, setMessages } = useContext(MessageContext);
-  const [message, setMessage] = useState('');
-  const [search, setSearch] = useState('');
+  const [message, setMessage] = useState("");
+  const [search, setSearch] = useState("");
   const [isModalOpen, setModalOpen] = useState(false);
-  const [data, setData] = useState('');
+  const [data, setData] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
@@ -30,54 +34,62 @@ const Home = () => {
     setShowPicker(false);
   };
 
-
   const getUserList = async () => {
-    let res = await fetch(`/api/users?auth_id=${authUser._id}&search=${search}`);
+    let res = await fetch(
+      `/api/users?auth_id=${authUser._id}&search=${search}`
+    );
     res = await res.json();
     if (res.success) {
       setUsers(res.data);
     }
-  }
+  };
 
   useEffect(() => {
     getUserList();
   }, [search]);
 
   useEffect(() => {
-    socket.emit('register-user', authUser._id);
+    // const socket = socket_connection();
+    socket.emit("register-user", authUser._id);
   }, []);
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    setMessage('');
+    setMessage("");
     const data = {
-      "message": message,
-      "sender_id": authUser?._id,
-      "receiver_id": user?._id,
-      "is_group": user?.is_group
+      message: message,
+      sender_id: authUser?._id,
+      receiver_id: user?._id,
+      is_group: user?.is_group,
     };
     let res = await fetch("api/messages", {
       method: "POST",
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     res = await res.json();
     if (res.success) {
-      socket.emit('private-message', JSON.stringify(res.data));
+      socket.emit("private-message", JSON.stringify(res.data));
     }
-  }
+  };
 
   //load read time messages
   const loadRealTimeMessages = () => {
-    socket.off('private-message');
-    socket.on('private-message', async (data) => {
-      if ((data?.is_group == 1 && user?._id == data?.receiver_id) || (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
-        (data?.sender_id == user?._id && data?.receiver_id == authUser?._id)) {
+    socket.off("private-message");
+    socket.on("private-message", async (data) => {
+      if (
+        (data?.is_group == 1 && user?._id == data?.receiver_id) ||
+        (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
+        (data?.sender_id == user?._id && data?.receiver_id == authUser?._id)
+      ) {
         let res = await loadMessages(user);
         setMessages(res);
-      }
-      else if (data?.receiver_id == authUser?._id || data?.is_group == 1) {
+      } else if (data?.receiver_id == authUser?._id || data?.is_group == 1) {
         let userList = [...users];
-        let index = userList.findIndex(user => ((user?._id == data.sender_id || user?._id == data.receiver_id) && user?.is_group == data?.is_group));
+        let index = userList.findIndex(
+          (user) =>
+            (user?._id == data.sender_id || user?._id == data.receiver_id) &&
+            user?.is_group == data?.is_group
+        );
         if (index >= 0) {
           userList[index].pending++;
           setUsers(userList);
@@ -88,26 +100,25 @@ const Home = () => {
 
   //online users
   const loadActiveUsers = () => {
-    socket.off('active-users');
-    socket.on('active-users', (data) => {
+    socket.off("active-users");
+    socket.on("active-users", (data) => {
       setActiveUsers(data);
-
     });
 
     //new user registered
-    socket.off('new-user');
-    socket.on('new-user', (data) => {
+    socket.off("new-user");
+    socket.on("new-user", (data) => {
       getUserList();
       if (data?._id !== authUser?._id) {
         toast.success(data?.message);
       }
     });
 
-    socket.off('user-updated');
-    socket.on('user-updated', (data) => {
+    socket.off("user-updated");
+    socket.on("user-updated", (data) => {
       //update users
       let userList = [...users];
-      let index = userList.findIndex(user => user?._id == data?._id);
+      let index = userList.findIndex((user) => user?._id == data?._id);
       if (index >= 0) {
         userList[index].name = data?.name;
         userList[index].photo = data?.photo;
@@ -131,25 +142,24 @@ const Home = () => {
       if (data?._id !== authUser?._id) {
         toast.success(data?.message);
       }
-
     });
 
-    socket.off('message-deleted');
-    socket.on('message-deleted', (data) => {
+    socket.off("message-deleted");
+    socket.on("message-deleted", (data) => {
       let filterMessages = [...messages];
-      filterMessages = filterMessages.filter(m => m?._id !== data?._id);
+      filterMessages = filterMessages.filter((m) => m?._id !== data?._id);
       setMessages(filterMessages);
     });
 
-    socket.off('add-group');
-    socket.on('add-group', (data) => {
+    socket.off("add-group");
+    socket.on("add-group", (data) => {
       let newUser = {
         _id: data?._id,
         name: data?.name,
         photo: data?.photo,
         pending: 0,
         is_group: 1,
-        total_members: data?.group_members?.length
+        total_members: data?.group_members?.length,
       };
 
       let newUsers = [...users, newUser];
@@ -160,14 +170,14 @@ const Home = () => {
       }
     });
 
-    socket.off('update-group');
-    socket.on('update-group', (data) => {
+    socket.off("update-group");
+    socket.on("update-group", (data) => {
       setModalOpen(false);
       if (data?.res?.status === 0) {
-        let newUsers = users.filter(user => user._id !== data?._id);
+        let newUsers = users.filter((user) => user._id !== data?._id);
         setUsers(newUsers);
         if (user._id === data?._id) {
-          setUser('');
+          setUser("");
           setMessages([]);
         }
       }
@@ -179,47 +189,47 @@ const Home = () => {
           photo: data?.photo,
           pending: 0,
           is_group: 1,
-          total_members: data?.total_members
+          total_members: data?.total_members,
         };
 
         let newUsers = [...users, newUser];
 
         setUsers(newUsers);
       }
-        
-      toast.success(data?.res?.message);
 
+      toast.success(data?.res?.message);
     });
 
-    socket.off('delete-group');
-    socket.on('delete-group', (data) => {
+    socket.off("delete-group");
+    socket.on("delete-group", (data) => {
       setModalOpen(false);
       if (user._id === data?._id) {
-        setUser('');
+        setUser("");
         setMessages([]);
       }
-      let newUsers = users.filter(user => user._id !== data?._id);
+      let newUsers = users.filter((user) => user._id !== data?._id);
       setUsers(newUsers);
       if (data.deleted_by !== authUser._id) {
         toast.success(data?.message);
       }
     });
 
-    socket.off('leave-group');
-    socket.on('leave-group', (res) => {
+    socket.off("leave-group");
+    socket.on("leave-group", (res) => {
       if (user._id === res?._id) {
         setUser({ ...user, total_members: user.total_members - 1 });
         if (isModalOpen) {
-          let newMembers = data?.members?.filter(m => m.user_id !== res?.user_id);
+          let newMembers = data?.members?.filter(
+            (m) => m.user_id !== res?.user_id
+          );
           setData({ ...data, members: newMembers });
         }
       }
 
       // if (res?.user_id !== authUser?._id) {
-        toast.success(res?.message);
+      toast.success(res?.message);
       // }
     });
-
   };
 
   useEffect(() => {
@@ -238,8 +248,7 @@ const Home = () => {
         );
         setData(res.data);
       }
-    }
-    else {
+    } else {
       let res = await fetch(`/api/user/profile/${user?._id}`);
       res = await res.json();
       if (res.success) {
@@ -249,41 +258,53 @@ const Home = () => {
     }
 
     setModalOpen(true);
-  }
+  };
 
   return (
     <div className="px-7 h-screen overflow-hidden flex items-center justify-center bg-[#edf2f7]">
       <div className="flex h-screen overflow-hidden w-full ">
-        <Sidebar setSearch={setSearch} search={search} activeUsers={activeUsers} />
+        <Sidebar
+          setSearch={setSearch}
+          search={search}
+          activeUsers={activeUsers}
+        />
         <div className="w-3/4">
-          {
-            user && (
-              <header className="bg-white p-4 text-gray-700 flex justify-between">
-                <div className="text-xl font-semibold cursor-pointer flex" onClick={handleEditOrViewModal}>
-
-                  <img src={getImageURL(user?.photo)} height={40} width={40} className="border-2 border-red-400 rounded-full w-10 h-10" title={user?.name} />
-                  <span className="mt-2 text-sm xs:text-sm sm:text-md md:text-lg lg:text-lg xl:text-lg font-semibold px-1">{user?.name} {user?.total_members > 0 ? `(${user?.total_members})` : null}</span>
-                  {
-                    activeUsers.includes(user?._id) && (<sup className="p-1 bg-green-500 rounded" style={{ height: "0px", marginTop: "10px" }}></sup>)
-                  }
+          {user && (
+            <header className="bg-white p-4 text-gray-700 flex justify-between">
+              <div
+                className="text-xl font-semibold cursor-pointer flex"
+                onClick={handleEditOrViewModal}
+              >
+                <img
+                  src={getImageURL(user?.photo)}
+                  height={40}
+                  width={40}
+                  className="border-2 border-red-400 rounded-full w-10 h-10"
+                  title={user?.name}
+                />
+                <span className="mt-2 text-sm xs:text-sm sm:text-md md:text-lg lg:text-lg xl:text-lg font-semibold px-1">
+                  {user?.name}{" "}
+                  {user?.total_members > 0 ? `(${user?.total_members})` : null}
+                </span>
+                {activeUsers.includes(user?._id) && (
+                  <sup
+                    className="p-1 bg-green-500 rounded"
+                    style={{ height: "0px", marginTop: "10px" }}
+                  ></sup>
+                )}
+              </div>
+              <div className="flex justify-end px-2 hidden">
+                <div className="cursor-pointer">
+                  <MdAddIcCall title="Voice Call" />
                 </div>
-                <div className="flex justify-end px-2 hidden">
-                  <div className="cursor-pointer">
-                    <MdAddIcCall title="Voice Call" />
-                  </div>
-                  <div className="px-2 cursor-pointer">
-                    <FaVideo title="Video Call" />
-                  </div>
-
+                <div className="px-2 cursor-pointer">
+                  <FaVideo title="Video Call" />
                 </div>
-              </header>
-            )
-          }
-          {
-            messages?.length > 0 && (<Messages />)
-          }
-          {
-            user &&
+              </div>
+            </header>
+          )}
+          {messages?.length > 0 && <Messages />}
+          {user && (
             <div>
               <form method="POST" onSubmit={sendMessage}>
                 <footer className="bg-white border-t border-gray-300 p-4 absolute bottom-0 w-4/6">
@@ -312,10 +333,13 @@ const Home = () => {
                           {/* Send Button */}
                           <button
                             type="submit"
-                            className={`ml-3 ${message.trim()?.length > 0 ? 'bg-indigo-500' : 'bg-indigo-200 cursor-not-allowed'
-                              } text-white px-4 py-2 rounded-md`}
+                            className={`ml-3 ${
+                              message.trim()?.length > 0
+                                ? "bg-indigo-500"
+                                : "bg-indigo-200 cursor-not-allowed"
+                            } text-white px-4 py-2 rounded-md`}
                             disabled={message.trim().length === 0}
-                            title={message.trim().length > 0 ? 'Send' : ''}
+                            title={message.trim().length > 0 ? "Send" : ""}
                           >
                             Send
                           </button>
@@ -331,20 +355,13 @@ const Home = () => {
                           </div>
                         )}
                       </div>
-
                     </div>
-
                   </div>
                 </footer>
               </form>
             </div>
-          }
-
-
-
+          )}
         </div>
-
-
       </div>
       <GroupEditOrViewModal
         isOpen={isModalOpen}
@@ -352,7 +369,7 @@ const Home = () => {
         data={data}
       />
     </div>
-  )
-}
+  );
+};
 
-export default Home
+export default Home;
