@@ -41,7 +41,7 @@ export const dateTimeFormat = (date) => {
 };
 
 export const socket_connection = () => {
-  let socket = io("https://chat.anwar.info.bd");
+  let socket = io("https://socket-server.anwar.info.bd");
   return socket;
 };
 
