@@ -29,6 +29,7 @@ Authenticator-based 2FA can be enabled or disabled under Profile settings. Disab
 
 ## Production and scale notes
 
+- **Vercel frontend + VPS Socket.IO:** set `NEXT_PUBLIC_SOCKET_URL` in Vercel to the public HTTPS Socket.IO hostname (for example, `https://socket.example.com`). Set `AUTH_SECRET` in Vercel and the VPS `.env` to the exact same random value of at least 32 characters. On the VPS, set `CORS_ORIGINS` to the exact browser origins of the app, comma-separated (for example, `https://chat.example.com,https://preview.chat.example.com`). The browser requests a signed, 60-second socket ticket from the authenticated Next.js API for every connection/reconnection, so the VPS does not need access to the app's session cookie or database. Do not use wildcard origins; give Vercel preview deployments a stable custom domain and add that exact origin. Serve the VPS through HTTPS and a WebSocket-capable reverse proxy.
 - Attachments are stored in the app's local `uploads/` directory and served only to message participants. This is suitable for local development or a single persistent host, not horizontally scaled deployments. Use shared object storage before running multiple app instances.
 - The Socket.IO server currently keeps presence and call state in process memory. Multi-instance deployments need the Socket.IO Redis adapter and shared presence/call coordination.
 - Group calling is peer-to-peer mesh, capped at eight participants. Use an SFU for larger or high-traffic group calls.
@@ -43,3 +44,5 @@ npm run start
 ```
 
 Run the Socket.IO server separately from its directory with `npm start`.
+
+See the [Socket-Server deployment guide](https://github.com/anwar7736/Socket-Server/blob/main/README.md) for VPS and reverse-proxy setup.

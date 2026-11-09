@@ -1,5 +1,6 @@
 const SESSION_COOKIE = "auth";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+const SOCKET_TOKEN_TTL_SECONDS = 60;
 
 export function getSessionSecret() {
   const secret = process.env.AUTH_SECRET;
@@ -38,6 +39,17 @@ export async function createSessionToken(userId) {
   const payload = `${userId}.${expiresAt}`;
   const signature = await crypto.subtle.sign("HMAC", await getSigningKey(), new TextEncoder().encode(payload));
   return `${payload}.${toBase64Url(signature)}`;
+}
+
+export async function createSocketToken(userId) {
+  const expiresAt = Math.floor(Date.now() / 1000) + SOCKET_TOKEN_TTL_SECONDS;
+  const payload = `socket:${userId}.${expiresAt}`;
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    await getSigningKey(),
+    new TextEncoder().encode(payload)
+  );
+  return `${userId}.${expiresAt}.${toBase64Url(signature)}`;
 }
 
 export async function verifySessionToken(token) {

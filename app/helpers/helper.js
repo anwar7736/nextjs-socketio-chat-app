@@ -74,7 +74,24 @@ export const dateTimeFormat = (date) => {
 export const socket_connection = () => {
   return io(
     process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3002",
-    { transports: ["websocket", "polling"], withCredentials: true, autoConnect: false }
+    {
+      transports: ["websocket", "polling"],
+      autoConnect: false,
+      auth: (callback) => {
+        fetch("/api/socket-token", { cache: "no-store" })
+          .then(async (response) => {
+            const result = await response.json();
+            if (!response.ok || !result.success || !result.token) {
+              throw new Error(result.message || "Unable to authenticate the real-time connection.");
+            }
+            callback({ token: result.token });
+          })
+          .catch((error) => {
+            console.error("Unable to authenticate the real-time connection:", error);
+            callback({ token: "" });
+          });
+      },
+    }
   );
 };
 
