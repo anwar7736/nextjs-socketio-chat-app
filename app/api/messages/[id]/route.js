@@ -1,6 +1,7 @@
 import { unlink } from "fs/promises";
 import { mongoDB_connect } from "@/app/helpers/helper";
 import { getSessionUserId } from "@/app/lib/session";
+import { removeFile } from "@/app/lib/fileStore";
 import { messageSchema } from "@/app/models/messageModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
 import mongoose from "mongoose";
@@ -46,10 +47,11 @@ export async function DELETE(request, context) {
   await messageLogSchema.deleteMany({ message_id: log.message_id });
   const filename = message.attachmentUrl?.match(/^\/api\/attachments\/([a-f\d]{24})_([a-f\d-]{36}\.(?:jpg|png|gif|webp|webm|ogg|mp3|m4a|mp4|mov|pdf))$/i);
   if (filename && filename[1] === userId) {
+    await removeFile(`${filename[1]}_${filename[2]}`);
     try {
-      await unlink(path.join(process.cwd(), "uploads", userId, filename[2]));
+      await unlink(path.join(process.cwd(), "uploads", userId, filename[2])); // older files kept on disk
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (!["ENOENT", "EROFS", "EACCES"].includes(error.code)) throw error;
     }
   }
   return NextResponse.json({ success: true, message: "Message removed.", message_id: messageLogId });

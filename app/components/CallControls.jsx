@@ -19,6 +19,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const pendingCandidatesRef = useRef(new Map());
   const callRef = useRef(null);
   const iceServersRef = useRef([{ urls: "stun:stun.l.google.com:19302" }]);
+  const currentUserIdRef = useRef(currentUser?._id);
+  currentUserIdRef.current = currentUser?._id;
+  const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
 
   const loadIceServers = useCallback(async () => {
     const response = await fetch("/api/calls/ice-servers");
@@ -38,6 +42,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     callRef.current = null;
     setCall(null);
     setRemoteStreams({});
+    setMuted(false);
+    setCameraOff(false);
   }, []);
 
   const makePeer = useCallback((peerId, callId) => {
@@ -58,19 +64,50 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       const stream = event.streams[0];
       if (stream) setRemoteStreams((streams) => ({ ...streams, [peerId]: stream }));
     };
-    peer.onconnectionstatechange = () => {
-      if (["failed", "closed"].includes(peer.connectionState)) {
-        setRemoteStreams((streams) => {
-          const next = { ...streams };
-          delete next[peerId];
-          return next;
-        });
-        peersRef.current.delete(peerId);
+    let restarts = 0;
+    peer.onconnectionstatechange = async () => {
+      // a dropped network (Wi-Fi to mobile data, a short outage): the side that made the offer
+      // asks for a fresh route a couple of times before giving the participant up
+      if (peer.connectionState === "failed" && restarts < 2 && currentUserIdRef.current < peerId) {
+        restarts += 1;
+        try {
+          peer.restartIce?.();
+          const offer = await peer.createOffer({ iceRestart: true });
+          await peer.setLocalDescription(offer);
+          socket.emit("call:signal", { callId, to: peerId, signal: { description: peer.localDescription.toJSON() } });
+          return;
+        } catch {
+          // fall through and drop the participant
+        }
+      }
+      if (peer.connectionState === "connected") restarts = 0;
+      if (peer.connectionState === "closed" || (peer.connectionState === "failed" && restarts >= 2)) {
+        removePeer(peerId);
       }
     };
     peersRef.current.set(peerId, peer);
     return peer;
   }, []);
+
+  const removePeer = useCallback((peerId) => {
+    peersRef.current.get(peerId)?.close();
+    peersRef.current.delete(peerId);
+    pendingCandidatesRef.current.delete(peerId);
+    setRemoteStreams((streams) => {
+      const next = { ...streams };
+      delete next[peerId];
+      return next;
+    });
+  }, []);
+
+  const toggleTrack = (kind) => {
+    const tracks = kind === "audio" ? localStreamRef.current?.getAudioTracks() : localStreamRef.current?.getVideoTracks();
+    if (!tracks?.length) return;
+    const enabled = !tracks[0].enabled;
+    tracks.forEach((track) => { track.enabled = enabled; });
+    if (kind === "audio") setMuted(!enabled);
+    else setCameraOff(!enabled);
+  };
 
   const flushCandidates = useCallback(async (peerId, peer) => {
     const queued = pendingCandidatesRef.current.get(peerId) || [];
@@ -112,11 +149,15 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         callerId: currentUser._id,
         callerName: currentUser.name,
         conversationName: conversation.name,
+        isGroup: conversation.is_group === 1,
       };
       callRef.current = activeCall;
       setCall(activeCall);
       socket.emit("call:invite", {
-        ...activeCall,
+        callId: activeCall.callId,
+        isVideo: activeCall.isVideo,
+        callerName: activeCall.callerName,
+        conversationName: activeCall.conversationName,
         recipients,
       });
     } catch (error) {
@@ -199,11 +240,22 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         toast.error("Unable to establish this call connection.");
       }
     };
-    const onEnded = ({ callId }) => {
-      if (callRef.current?.callId === callId) stopCall(false);
+    const onEnded = ({ callId, reason }) => {
+      if (callRef.current?.callId === callId) {
+        stopCall(false);
+        if (reason === "no-answer") toast.info("No answer.");
+        else if (reason === "declined") toast.info("The call was declined.");
+        else toast.info("The call has ended.");
+      }
       setIncoming((current) => current?.callId === callId ? null : current);
     };
-    const onRejected = () => toast.info("A participant declined the call.");
+    const onLeft = ({ callId, userId }) => {
+      if (callRef.current?.callId === callId) removePeer(userId);
+    };
+    const onRejected = ({ callId }) => {
+      // in a one-to-one call the call:end that follows says it was declined
+      if (callRef.current?.callId === callId && callRef.current.isGroup) toast.info("A participant declined the call.");
+    };
     const onUnavailable = ({ callId }) => {
       if (callRef.current?.callId !== callId) return;
       toast.info("No one is available to take the call.");
@@ -216,6 +268,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     socket.on("call:participant", onParticipant);
     socket.on("call:signal", onSignal);
     socket.on("call:end", onEnded);
+    socket.on("call:left", onLeft);
     socket.on("call:rejected", onRejected);
     socket.on("call:unavailable", onUnavailable);
     return () => {
@@ -225,11 +278,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       socket.off("call:participant", onParticipant);
       socket.off("call:signal", onSignal);
       socket.off("call:end", onEnded);
+      socket.off("call:left", onLeft);
       socket.off("call:rejected", onRejected);
       socket.off("call:unavailable", onUnavailable);
       stopCall();
     };
-  }, [currentUser?._id, flushCandidates, loadIceServers, makePeer, stopCall]);
+  }, [currentUser?._id, flushCandidates, loadIceServers, makePeer, removePeer, stopCall]);
 
   useEffect(() => {
     if (call && localStreamRef.current) {
@@ -282,8 +336,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               <p className="font-semibold text-white">{call.conversationName || conversation?.name || "Call"}</p>
               <p className="text-sm text-[#91a0b7]">{call.isVideo ? "Video call" : "Voice call"} · {Object.keys(remoteStreams).length + 1} participant(s)</p>
             </div>
-            <button type="button" className="rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white hover:bg-rose-500" onClick={() => stopCall()}>End call</button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" aria-pressed={muted} className="rounded-xl bg-[#263248] px-4 py-3 font-medium text-white hover:bg-[#33415c]" onClick={() => toggleTrack("audio")}>{muted ? "Unmute" : "Mute"}</button>
+              {call.isVideo && <button type="button" aria-pressed={cameraOff} className="rounded-xl bg-[#263248] px-4 py-3 font-medium text-white hover:bg-[#33415c]" onClick={() => toggleTrack("video")}>{cameraOff ? "Camera on" : "Camera off"}</button>}
+              <button type="button" className="rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white hover:bg-rose-500" onClick={() => stopCall()}>End call</button>
+            </div>
           </div>
+          {Object.keys(remoteStreams).length === 0 && <p className="mb-3 text-sm text-[#91a0b7]">{call.isCaller === false ? "Connecting…" : "Ringing…"}</p>}
           <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {call.isVideo && <CallVideo streamId="local-call-stream" stream={localStreamRef.current} muted label="You" />}
             {Object.entries(remoteStreams).map(([id, stream]) => (

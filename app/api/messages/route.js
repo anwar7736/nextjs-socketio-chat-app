@@ -141,6 +141,7 @@ export async function POST(request) {
   });
 
   let logs;
+  let recipientIds;
   if (isGroup) {
     const members = await groupMemberSchema.find({ group_id: receiverId, status: 1 }).select("user_id").lean();
     logs = members.map(({ user_id }) => ({
@@ -151,6 +152,8 @@ export async function POST(request) {
       status: senderId.equals(user_id) ? 1 : 0,
     }));
     if (logs.length) await messageLogSchema.insertMany(logs, { ordered: true });
+    // the socket server sends the real-time notice (ids only) to these members alone
+    recipientIds = members.map(({ user_id }) => String(user_id)).filter((id) => id !== sessionUserId);
   } else {
     await messageLogSchema.create({
       message_id: message._id,
@@ -161,7 +164,12 @@ export async function POST(request) {
 
   return NextResponse.json({
     success: true,
-    data: { sender_id: sessionUserId, receiver_id, is_group: isGroup ? 1 : 0 },
+    data: {
+      sender_id: sessionUserId,
+      receiver_id,
+      is_group: isGroup ? 1 : 0,
+      ...(isGroup ? { recipient_ids: recipientIds } : {}),
+    },
   });
 }
 

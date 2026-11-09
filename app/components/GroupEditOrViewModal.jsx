@@ -146,7 +146,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             _id: data._id,
             user_id: user._id,
             message: `${user.name} left from "${data.name}"`,
-            groupMembers: res?.groupMembers,
+            groupMembers: (res?.groupMembers || []).map((m) => String(m.user_id)),
           };
           socket.emit("leave-group", JSON.stringify(response));
           onClose();
@@ -188,7 +188,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             _id: data._id,
             deleted_by: user._id,
             message: `"${data?.name}" deleted by ${user.name}`,
-            groupMembers: res.groupMembers,
+            groupMembers: (res.groupMembers || []).map((m) => String(m.user_id)),
           };
           socket.emit("delete-group", JSON.stringify(response));
           onClose();

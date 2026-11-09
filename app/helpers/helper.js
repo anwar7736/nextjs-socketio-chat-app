@@ -8,7 +8,12 @@ export const mongoDB_connect = async () => {
   if (mongoose.connection.readyState === 1) return mongoose.connection;
   if (!mongooseConnection) {
     mongooseConnection = mongoose
-      .connect(connectionStr, { maxPoolSize: 20, serverSelectionTimeoutMS: 10000 })
+      // each serverless instance keeps its own pool; small pools keep many instances under the database's connection limit
+      .connect(connectionStr, {
+        maxPoolSize: Number(process.env.MONGODB_POOL_SIZE) || 10,
+        maxIdleTimeMS: 60000,
+        serverSelectionTimeoutMS: 10000,
+      })
       .catch((error) => {
         mongooseConnection = null;
         throw error;
@@ -95,8 +100,13 @@ export const socket_connection = () => {
   );
 };
 
+// photos uploaded by the app are stored in the database (random uuid names, see app/lib/profileImage.js)
+const storedPhoto = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}\.(jpg|png|webp)$/i;
+
 export const getImageURL = (imageName, type = null) => {
-  if (imageName) {
+  if (imageName && !type && storedPhoto.test(imageName)) {
+    return `/api/photos/${imageName}`;
+  } else if (imageName) {
     return `.${type ? "/public" : ""}/images/users/${imageName}`;
   } else if (!imageName && !type) {
     return `./images/default.svg`;

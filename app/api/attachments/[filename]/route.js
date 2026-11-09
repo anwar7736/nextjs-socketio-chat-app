@@ -4,6 +4,7 @@ import { Readable } from "stream";
 import path from "path";
 import { mongoDB_connect } from "@/app/helpers/helper";
 import { getSessionUserId } from "@/app/lib/session";
+import { openFile } from "@/app/lib/fileStore";
 import { messageSchema } from "@/app/models/messageModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
 import mongoose from "mongoose";
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 
 export async function GET(request, context) {
   const userId = await getSessionUserId(request);
-  const filename = context.params.filename;
+  const { filename } = await context.params;
   if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
   const filenameMatch = /^([a-f\d]{24})_([a-f\d-]{36}\.(jpg|png|gif|webp|webm|ogg|mp3|m4a|mp4|mov|pdf))$/i.exec(filename || "");
   if (!filenameMatch) {
@@ -31,19 +32,27 @@ export async function GET(request, context) {
   });
   if (!canRead) return NextResponse.json({ success: false, message: "File not found." }, { status: 404 });
 
-  const filePath = path.join(process.cwd(), "uploads", ownerId, filenameMatch[2]);
-  let fileInfo;
-  try {
-    fileInfo = await stat(filePath);
-  } catch (error) {
-    if (error.code === "ENOENT") return NextResponse.json({ success: false, message: "File not found." }, { status: 404 });
-    throw error;
+  let stream;
+  let size;
+  const stored = await openFile(filename);
+  if (stored) {
+    stream = stored.stream;
+    size = stored.length;
+  } else {
+    // files uploaded before attachments moved to the database
+    const filePath = path.join(process.cwd(), "uploads", ownerId, filenameMatch[2]);
+    try {
+      size = (await stat(filePath)).size;
+    } catch (error) {
+      if (error.code === "ENOENT") return NextResponse.json({ success: false, message: "File not found." }, { status: 404 });
+      throw error;
+    }
+    stream = Readable.toWeb(createReadStream(filePath));
   }
-  const stream = Readable.toWeb(createReadStream(filePath));
   return new Response(stream, {
     headers: {
       "Content-Type": message.mimeType || "application/octet-stream",
-      "Content-Length": String(fileInfo.size),
+      "Content-Length": String(size),
       "Content-Disposition": "inline",
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",

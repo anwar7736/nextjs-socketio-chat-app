@@ -120,6 +120,8 @@ const Home = () => {
         socket.emit("private-message", JSON.stringify(res.data));
         setMessage("");
         setAttachment(null);
+        // the socket server does not echo an event back to the tab that sent it
+        setMessages(await loadMessages(user));
       } else {
         setMessageError(res.message || "Unable to send message.");
       }

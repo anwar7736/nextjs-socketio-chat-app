@@ -1,12 +1,13 @@
 import { randomUUID } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
 import { NextResponse } from "next/server";
-import path from "path";
 import { getSessionUserId } from "@/app/lib/session";
+import { saveFile } from "@/app/lib/fileStore";
 
 export const runtime = "nodejs";
 
-const MAX_FILE_SIZE = 15 * 1024 * 1024;
+// Vercel functions accept request bodies up to about 4.5 MB; other hosts take larger files.
+const MAX_FILE_MB = Number(process.env.MAX_UPLOAD_MB) || (process.env.VERCEL ? 4 : 15);
+const MAX_FILE_SIZE = MAX_FILE_MB * 1024 * 1024;
 const allowedTypes = new Map([
   ["image/jpeg", ".jpg"],
   ["image/png", ".png"],
@@ -25,7 +26,12 @@ const allowedTypes = new Map([
 export async function POST(request) {
   const userId = await getSessionUserId(request);
   if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
-  const formData = await request.formData();
+  let formData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json({ success: false, message: `Files must be smaller than ${MAX_FILE_MB} MB.` }, { status: 413 });
+  }
   const file = formData.get("file");
 
   if (!file || typeof file.arrayBuffer !== "function") {
@@ -38,13 +44,11 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: "This file type is not supported." }, { status: 415 });
   }
   if (file.size === 0 || file.size > MAX_FILE_SIZE) {
-    return NextResponse.json({ success: false, message: "Files must be smaller than 15 MB." }, { status: 413 });
+    return NextResponse.json({ success: false, message: `Files must be smaller than ${MAX_FILE_MB} MB.` }, { status: 413 });
   }
 
   const filename = `${userId}_${randomUUID()}${extension}`;
-  const uploadDirectory = path.join(process.cwd(), "uploads", userId);
-  await mkdir(uploadDirectory, { recursive: true });
-  await writeFile(path.join(uploadDirectory, filename), Buffer.from(await file.arrayBuffer()), { flag: "wx" });
+  await saveFile(filename, Buffer.from(await file.arrayBuffer()), { contentType: mimeType, owner: userId });
 
   return NextResponse.json({
     success: true,

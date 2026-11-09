@@ -36,7 +36,14 @@ const Messages = () => {
       const res = await response.json();
       if (res.success) {
         setMessages(messages.filter((message) => message?._id !== res?.message_id));
-        if (method === "DELETE") socket.emit("message-deleted", JSON.stringify(msg));
+        // ids only: the removed message's text must not travel to anyone
+        if (method === "DELETE") {
+          socket.emit("message-deleted", JSON.stringify({
+            _id: msg?._id,
+            sender: { _id: msg?.sender?._id },
+            receiver: { _id: msg?.receiver?._id },
+          }));
+        }
       } else {
         toast.error(res.message || "Unable to remove this message.");
       }
