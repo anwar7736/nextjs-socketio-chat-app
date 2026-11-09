@@ -1,23 +1,27 @@
 import { mongoDB_connect } from "@/app/helpers/helper";
 import { userSchema } from "@/app/models/userModel";
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
-import { groupSchema } from "@/app/models/groupModel";
+import { getSessionUserId } from "@/app/lib/session";
 
-mongoDB_connect();
 export async function GET(request) {
-    let success = false;
+    const userId = await getSessionUserId(request);
     const queryParams = request.nextUrl.searchParams;
     const auth_id = queryParams.get('auth_id');
-    const search = queryParams.get('search');
+    const search = (queryParams.get('search') || '').slice(0, 100);
+    if (!userId || (auth_id && auth_id !== userId)) {
+        return NextResponse.json({ success: false, message: 'Unauthorized.' }, { status: 401 });
+    }
+    await mongoDB_connect();
+    const authObjectId = new mongoose.Types.ObjectId(userId);
+    const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let data = await userSchema.aggregate([
         // User Query
         {
             $match: {
-                name: { $regex: new RegExp(search, 'i') },
-                _id: { $ne: new mongoose.Types.ObjectId(auth_id) },
+                name: { $regex: new RegExp(escapedSearch, 'i') },
+                _id: { $ne: authObjectId },
             }
         },
         {
@@ -47,7 +51,7 @@ export async function GET(request) {
                                         ]
                                     },
                                     { $eq: ["$$log.status", 0] },
-                                    { $eq: ["$$log.receiver_id", new mongoose.Types.ObjectId(auth_id)] }
+                                    { $eq: ["$$log.receiver_id", authObjectId] }
                                 ]
                             }
                         }
@@ -85,7 +89,7 @@ export async function GET(request) {
                         $match: {
                             members: {
                                 $elemMatch: {
-                                    user_id: new mongoose.Types.ObjectId(auth_id),
+                                    user_id: authObjectId,
                                     status: 1 // Active member
                                 }
                             }
@@ -127,7 +131,7 @@ export async function GET(request) {
                                         cond: {
                                             $and: [
                                                 { $eq: ["$$log.status", 0] },
-                                                { $eq: ["$$log.receiver_id", new mongoose.Types.ObjectId(auth_id)] }
+                                                { $eq: ["$$log.receiver_id", authObjectId] }
                                             ]
                                         }
                                     }
@@ -138,7 +142,7 @@ export async function GET(request) {
                     },
                     {
                         $match: {
-                            name: { $regex: new RegExp(search, 'i') }
+                            name: { $regex: new RegExp(escapedSearch, 'i') }
                         }
                     },
                     {
@@ -162,10 +166,5 @@ export async function GET(request) {
     ]);
     
 
-    if(data.length > 0)
-    {
-        success = true;
-    }
-    
-    return NextResponse.json({ success, data });
+    return NextResponse.json({ success: true, data });
 }

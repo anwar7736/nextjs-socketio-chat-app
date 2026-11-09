@@ -1,194 +1,154 @@
+"use client";
+
 import { AuthContext } from "@/app/contexts/AuthContext";
-import { auth, socket_connection } from "@/app/helpers/helper";
-import { setCookie } from "cookies-next";
+import { setAuthProfile } from "@/app/helpers/helper";
 import { useRouter } from "next/navigation";
 import { useContext, useState } from "react";
-import { useForm } from "react-hook-form";
 import { toast } from "react-toastify";
 import ValidationError from "../ValidationError";
-let socket = socket_connection();
-const SignUp = () => {
+
+export default function SignUp() {
   const router = useRouter();
-  const { user, setUser } = useContext(AuthContext);
-  const [isDisabled, setIsDisabled] = useState(false);
-  const {
-    register,
-    handleSubmit,
-    watch,
-    formState: { errors },
-  } = useForm();
+  const { setUser } = useContext(AuthContext);
+  const [step, setStep] = useState("details");
+  const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    password: "",
+    confirmPassword: "",
+    code: "",
+  });
 
-  const signupFormHandler = async (data) => {
-    setIsDisabled(true);
-    let formData = new FormData();
-    formData.append("name", data.name);
-    formData.append("phone", data.phone);
-    formData.append("address", data.address);
-    formData.append("password", data.password);
-    formData.append("photo", data.photo[0]);
-    formData.append("login", 0);
-    let res = await fetch("api/user", {
-      method: "POST",
-      body: formData,
-    });
+  const update = (event) => setForm({ ...form, [event.target.name]: event.target.value });
+  const clearError = (field) =>
+    setFieldErrors((current) => ({ ...current, [field]: "" }));
 
-    res = await res.json();
-    setIsDisabled(false);
-    if (res.success) {
-      delete res.data.password;
-      res.data.message = `${res.data.name} registered now.`;
-      socket.emit("new-user", JSON.stringify(res.data));
-      setCookie("auth", JSON.stringify(res.data));
-      setUser(auth());
-      let redirectUrl = "/";
-      router.push(redirectUrl);
-      // toast.success(res.message);
-    } else {
-      toast.error(res.message);
+  const requestCode = async (event) => {
+    event.preventDefault();
+    const errors = {};
+    if (form.name.trim().length < 3) errors.name = "Enter your name (at least 3 characters).";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      errors.email = "Enter a valid email address.";
+    }
+    if (form.password.length < 10 || form.password.length > 128) {
+      errors.password = "Use a password between 10 and 128 characters.";
+    }
+    if (form.password !== form.confirmPassword) errors.confirmPassword = "Passwords do not match.";
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) return;
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.email, purpose: "register" }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setFieldErrors((current) => ({ ...current, email: result.message || "Unable to send a verification code." }));
+        return;
+      }
+      toast.success(result.message);
+      setStep("verify");
+    } catch (error) {
+      setFieldErrors((current) => ({ ...current, email: "Unable to reach the server. Please try again." }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const completeRegistration = async (event) => {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(form.code)) {
+      setFieldErrors({ code: "Enter the 6-digit email verification code." });
+      return;
+    }
+    setFieldErrors({});
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        const message = result.message || "Unable to create your account.";
+        const field = message.toLowerCase().includes("phone")
+          ? "phone"
+          : message.toLowerCase().includes("name")
+            ? "name"
+            : message.toLowerCase().includes("password")
+              ? "password"
+              : message.toLowerCase().includes("email")
+                ? "email"
+                : "code";
+        setFieldErrors((current) => ({ ...current, [field]: message }));
+        if (field !== "code") setStep("details");
+        return;
+      }
+      setAuthProfile(result.data);
+      setUser(result.data);
+      router.push("/");
+    } catch (error) {
+      setFieldErrors({ code: "Unable to reach the server. Please try again." });
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div align="center">
-      <h2 className="font-bold">Registration</h2>
-      <div className="w-full max-w-xs">
-        <form
-          className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4"
-          onSubmit={handleSubmit(signupFormHandler)}
-        >
-          <div className="mb-4">
-            <label
-              className="block text-gray-700 text-sm font-bold mb-2 text-start"
-              htmlFor="name"
-            >
-              Name
-            </label>
-            <input
-              className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline mb-1"
-              id="name"
-              type="text"
-              placeholder="Name"
-              {...register("name", {
-                required: "This field is required",
-                minLength: {
-                  value: 3,
-                  message: "This should be atleast 3 characters.",
-                },
-              })}
-            />
-            {errors.name && <ValidationError message={errors.name.message} />}
-          </div>
-          <div className="mb-4">
-            <label
-              className="block text-gray-700 text-sm font-bold mb-2 text-start"
-              htmlFor="phone"
-            >
-              Phone
-            </label>
-            <input
-              className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline mb-1"
-              id="phone"
-              type="text"
-              placeholder="Phone"
-              {...register("phone", {
-                required: "Provide a valid phone number.",
-                pattern: /^([+]{1}[8]{2}|0088)?(01)[3-9]\d{8}$/,
-              })}
-            />
-            {errors.phone && <ValidationError message={errors.phone.message} />}
-          </div>
-          <div className="mb-4">
-            <label
-              className="block text-gray-700 text-sm font-bold mb-2 text-start"
-              htmlFor="address"
-            >
-              Address
-            </label>
-            <textarea
-              className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline mb-1"
-              id="address"
-              type="text"
-              placeholder="Address"
-              {...register("address", { required: "This field is required." })}
-            ></textarea>
-            {errors.address && (
-              <ValidationError message={errors.address.message} />
-            )}
-          </div>
-          <div className="mb-6">
-            <label
-              className="block text-gray-700 text-sm font-bold mb-2 text-start"
-              htmlFor="password"
-            >
-              Password
-            </label>
-            <input
-              className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline"
-              id="password"
-              type="password"
-              placeholder="******************"
-              {...register("password", {
-                required: "This field is required.",
-                minLength: {
-                  value: 4,
-                  message: "Provide atleast 4 digits/characters.",
-                },
-                validate: (value) =>
-                  value == watch("cpassword") ||
-                  "Both password did not matched.",
-              })}
-            />
-            {errors.password && (
-              <ValidationError message={errors.password.message} />
-            )}
-          </div>
-          <div className="mb-6">
-            <label
-              className="block text-gray-700 text-sm font-bold mb-2 text-start"
-              htmlFor="cpassword"
-            >
-              Re-type Password
-            </label>
-            <input
-              className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline"
-              id="cpassword"
-              type="password"
-              placeholder="******************"
-              {...register("cpassword", {
-                required: "This field is required.",
-              })}
-            />
-          </div>
-          <div className="mb-6">
-            <label
-              className="block text-gray-700 text-sm font-bold mb-2 text-start"
-              htmlFor="photo"
-            >
-              Profile Photo
-            </label>
-            <input
-              className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline"
-              id="photo"
-              type="file"
-              placeholder="******************"
-              {...register("photo")}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <button
-              disabled={isDisabled}
-              className={`bg-green-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${
-                isDisabled ? "cursor-not-allowed opacity-50" : ""
-              }`}
-              type="submit"
-            >
-              Register
-            </button>
-          </div>
-        </form>
+    <section className="auth-card">
+      <div className="mb-8">
+        <div className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-indigo-500 text-xl font-bold text-white">C</div>
+        <p className="mb-2 text-sm font-medium uppercase tracking-[0.18em] text-indigo-300">Create your account</p>
+        <h1 className="text-2xl font-semibold text-white">{step === "details" ? "Join the conversation" : "Verify your email"}</h1>
+        <p className="mt-2 text-sm leading-6 text-[#91a0b7]">
+          {step === "details" ? "A quick setup, then you’re ready to chat." : `We sent a 6-digit code to ${form.email}.`}
+        </p>
       </div>
-    </div>
-  );
-};
 
-export default SignUp;
+      {step === "details" ? (
+        <form className="space-y-4" onSubmit={requestCode} noValidate>
+          <label className="block text-sm text-[#c7d2e3]">Full name
+            <input className="form-control mt-2" name="name" autoComplete="name" required minLength={3} value={form.name} onChange={(event) => { update(event); clearError("name"); }} />
+            <ValidationError message={fieldErrors.name} />
+          </label>
+          <label className="block text-sm text-[#c7d2e3]">Email address
+            <input className="form-control mt-2" type="email" name="email" autoComplete="email" required value={form.email} onChange={(event) => { update(event); clearError("email"); }} />
+            <ValidationError message={fieldErrors.email} />
+          </label>
+          <label className="block text-sm text-[#c7d2e3]">Phone number <span className="text-[#728099]">(optional)</span>
+            <input className="form-control mt-2" type="tel" name="phone" autoComplete="tel" value={form.phone} onChange={(event) => { update(event); clearError("phone"); }} />
+            <ValidationError message={fieldErrors.phone} />
+          </label>
+          <label className="block text-sm text-[#c7d2e3]">Password
+            <input className="form-control mt-2" type="password" name="password" autoComplete="new-password" required minLength={10} maxLength={128} value={form.password} onChange={(event) => { update(event); clearError("password"); }} />
+            <ValidationError message={fieldErrors.password} />
+          </label>
+          <label className="block text-sm text-[#c7d2e3]">Confirm password
+            <input className="form-control mt-2" type="password" name="confirmPassword" autoComplete="new-password" required value={form.confirmPassword} onChange={(event) => { update(event); clearError("confirmPassword"); }} />
+            <ValidationError message={fieldErrors.confirmPassword} />
+          </label>
+          <button className="w-full rounded-xl bg-indigo-500 px-4 py-3 font-semibold text-white hover:bg-indigo-400 disabled:opacity-50" disabled={loading}>
+            {loading ? "Sending code..." : "Continue with email"}
+          </button>
+        </form>
+      ) : (
+        <form className="space-y-4" onSubmit={completeRegistration} noValidate>
+          <label className="block text-sm text-[#c7d2e3]">Email verification code
+            <input className="form-control mt-2 text-center text-lg tracking-[0.4em]" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={form.code} onChange={(event) => { update(event); clearError("code"); }} />
+            <ValidationError message={fieldErrors.code} />
+          </label>
+          <button className="w-full rounded-xl bg-indigo-500 px-4 py-3 font-semibold text-white hover:bg-indigo-400 disabled:opacity-50" disabled={loading}>
+            {loading ? "Creating account..." : "Verify and create account"}
+          </button>
+          <button type="button" className="w-full text-sm text-[#91a0b7] hover:text-white" onClick={() => setStep("details")}>Back to account details</button>
+        </form>
+      )}
+    </section>
+  );
+}

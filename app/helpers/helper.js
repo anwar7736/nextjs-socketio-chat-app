@@ -1,17 +1,48 @@
-import { getCookie, hasCookie } from "cookies-next";
 import mongoose from "mongoose";
 import { io } from "socket.io-client";
 import { connectionStr } from "../lib/db";
 export const mongoDB_connect = async () => {
-  return await mongoose.connect(connectionStr);
+  if (!connectionStr) {
+    throw new Error("Set MONGODB_URI or DB_DATABASE, DB_USERNAME, and DB_PASSWORD.");
+  }
+  if (mongoose.connection.readyState === 1) return mongoose.connection;
+  if (!mongooseConnection) {
+    mongooseConnection = mongoose
+      .connect(connectionStr, { maxPoolSize: 20, serverSelectionTimeoutMS: 10000 })
+      .catch((error) => {
+        mongooseConnection = null;
+        throw error;
+      });
+  }
+  return mongooseConnection;
 };
 
+let mongooseConnection;
+
 export const auth = () => {
-  return isAuth() ? JSON.parse(getCookie("auth")) : "";
+  if (typeof window === "undefined") return "";
+  try {
+    return JSON.parse(window.localStorage.getItem("auth-profile") || '""');
+  } catch (error) {
+    console.error("Unable to read the signed-in profile:", error);
+    return "";
+  }
 };
 
 export const isAuth = () => {
-  return hasCookie("auth");
+  return Boolean(auth()?._id);
+};
+
+export const setAuthProfile = (user) => {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem("auth-profile", JSON.stringify(user));
+  }
+};
+
+export const clearAuthProfile = () => {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem("auth-profile");
+  }
 };
 
 export const causer_id = () => {
@@ -41,8 +72,10 @@ export const dateTimeFormat = (date) => {
 };
 
 export const socket_connection = () => {
-  let socket = io("https://socket-server.anwar.info.bd");
-  return socket;
+  return io(
+    process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3002",
+    { transports: ["websocket", "polling"], withCredentials: true, autoConnect: false }
+  );
 };
 
 export const getImageURL = (imageName, type = null) => {

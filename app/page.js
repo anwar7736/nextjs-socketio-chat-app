@@ -1,12 +1,14 @@
 "use client";
 import Picker from "emoji-picker-react";
-import { useContext, useEffect, useState } from "react";
-import { FaVideo } from "react-icons/fa";
-import { MdAddIcCall } from "react-icons/md";
+import { useContext, useEffect, useRef, useState } from "react";
+import { FaPaperclip } from "react-icons/fa";
+import { FiMic, FiSquare } from "react-icons/fi";
 import { toast } from "react-toastify";
 import GroupEditOrViewModal from "./components/GroupEditOrViewModal";
 import Messages from "./components/Messages";
 import Sidebar from "./components/Sidebar";
+import CallControls from "./components/CallControls";
+import ValidationError from "./components/ValidationError";
 import { MessageContext } from "./contexts/MessageContext";
 import { UserContext } from "./contexts/UserContext";
 import { UserListContext } from "./contexts/UserListContext";
@@ -28,6 +30,14 @@ const Home = () => {
   const [isModalOpen, setModalOpen] = useState(false);
   const [data, setData] = useState("");
   const [showPicker, setShowPicker] = useState(false);
+  const [attachment, setAttachment] = useState(null);
+  const [messageError, setMessageError] = useState("");
+  const [attachmentError, setAttachmentError] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [sending, setSending] = useState(false);
+  const recorderRef = useRef(null);
+  const recordingTimerRef = useRef(null);
+  const fileInputRef = useRef(null);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
     setMessage((msg) => msg + emojiObject.emoji);
@@ -49,26 +59,118 @@ const Home = () => {
   }, [search]);
 
   useEffect(() => {
-    // const socket = socket_connection();
-    socket.emit("register-user", authUser._id);
-  }, []);
+    if (!authUser?._id) return;
+    const registerUser = () => socket.emit("register-user");
+    socket.on("connect", registerUser);
+    socket.connect();
+    if (socket.connected) registerUser();
+    return () => socket.off("connect", registerUser);
+  }, [authUser?._id]);
 
   const sendMessage = async (e) => {
-    e.preventDefault();
-    setMessage("");
-    const data = {
-      message: message,
-      sender_id: authUser?._id,
-      receiver_id: user?._id,
-      is_group: user?.is_group,
-    };
-    let res = await fetch("api/messages", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    res = await res.json();
-    if (res.success) {
-      socket.emit("private-message", JSON.stringify(res.data));
+    e?.preventDefault();
+    if (sending) return;
+    if (!message.trim() && !attachment) {
+      setMessageError("Enter a message or attach a file before sending.");
+      return;
+    }
+    if (message.trim().length > 5000) {
+      setMessageError("Messages can contain up to 5,000 characters.");
+      return;
+    }
+    setMessageError("");
+    setAttachmentError("");
+    setSending(true);
+    try {
+      let uploaded = null;
+      if (attachment) {
+        const uploadData = new FormData();
+        uploadData.append("file", attachment);
+        const uploadResponse = await fetch("/api/upload", { method: "POST", body: uploadData });
+        const uploadResult = await uploadResponse.json();
+        if (!uploadResponse.ok || !uploadResult.success) {
+          setAttachmentError(uploadResult.message || "Unable to upload this file.");
+          return;
+        }
+        uploaded = uploadResult.data;
+      }
+
+      const data = {
+        message: message,
+        sender_id: authUser?._id,
+        receiver_id: user?._id,
+        is_group: user?.is_group,
+        attachmentUrl: uploaded?.url,
+        attachmentName: uploaded?.name,
+        mimeType: uploaded?.mimeType,
+        type: uploaded?.mimeType?.startsWith("image/")
+          ? "image"
+          : uploaded?.mimeType?.startsWith("audio/")
+            ? "audio"
+            : uploaded?.mimeType?.startsWith("video/")
+              ? "video"
+              : uploaded ? "file" : "text",
+      };
+      const response = await fetch("/api/messages", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      const res = await response.json();
+      if (response.ok && res.success) {
+        socket.emit("private-message", JSON.stringify(res.data));
+        setMessage("");
+        setAttachment(null);
+      } else {
+        setMessageError(res.message || "Unable to send message.");
+      }
+    } catch (error) {
+      setMessageError("Unable to send this message. Check your connection and try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const toggleVoiceRecording = async () => {
+    if (recording) {
+      clearTimeout(recordingTimerRef.current);
+      recorderRef.current?.stop();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setAttachmentError("Voice recording is not supported in this browser.");
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        clearTimeout(recordingTimerRef.current);
+        const voiceNote = new File(chunks, `voice-note-${Date.now()}.webm`, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        setAttachment(voiceNote);
+        setAttachmentError("");
+        stream.getTracks().forEach((track) => track.stop());
+        recorderRef.current = null;
+        setRecording(false);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+      recordingTimerRef.current = setTimeout(() => {
+        if (recorder.state === "recording") {
+          toast.info("Voice notes are limited to 2 minutes.");
+          recorder.stop();
+        }
+      }, 120_000);
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      setAttachmentError("Microphone access was denied.");
     }
   };
 
@@ -261,54 +363,131 @@ const Home = () => {
   };
 
   return (
-    <div className="px-7 h-screen overflow-hidden flex items-center justify-center bg-[#edf2f7]">
-      <div className="flex h-screen overflow-hidden w-full ">
+    <div className="chat-shell">
+      <div className="chat-panel">
         <Sidebar
+          className={user ? "is-hidden-mobile" : ""}
           setSearch={setSearch}
           search={search}
           activeUsers={activeUsers}
         />
-        <div className="w-3/4">
-          {user && (
-            <header className="bg-white p-4 text-gray-700 flex justify-between">
+        <main className={`chat-main ${!user ? "is-hidden-mobile" : ""}`}>
+          <header className="flex items-center justify-between border-b border-[#263248] bg-[#111827]/95 px-4 py-3 text-white sm:px-6">
+            {user ? (
               <div
-                className="text-xl font-semibold cursor-pointer flex"
+                className="flex min-w-0 cursor-pointer items-center gap-3"
                 onClick={handleEditOrViewModal}
               >
+                <button
+                  type="button"
+                  className="mr-1 rounded-lg p-2 text-gray-300 hover:bg-[#263248] md:hidden"
+                  aria-label="Back to conversations"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setUser("");
+                    setMessages([]);
+                  }}
+                >
+                  <span aria-hidden="true">←</span>
+                </button>
                 <img
                   src={getImageURL(user?.photo)}
                   height={40}
                   width={40}
-                  className="border-2 border-red-400 rounded-full w-10 h-10"
+                  className="h-10 w-10 rounded-full border border-indigo-400 object-cover"
                   title={user?.name}
                 />
-                <span className="mt-2 text-sm xs:text-sm sm:text-md md:text-lg lg:text-lg xl:text-lg font-semibold px-1">
-                  {user?.name}{" "}
-                  {user?.total_members > 0 ? `(${user?.total_members})` : null}
+                <span className="truncate">
+                  <span className="block truncate text-sm font-semibold sm:text-base">{user?.name}</span>
+                  <span className="block text-xs text-[#91a0b7]">
+                    {user?.is_group === 1
+                      ? `${user?.total_members || 0} members`
+                      : activeUsers.includes(user?._id) ? "Online" : "Conversation"}
+                  </span>
                 </span>
                 {activeUsers.includes(user?._id) && (
-                  <sup
-                    className="p-1 bg-green-500 rounded"
-                    style={{ height: "0px", marginTop: "10px" }}
-                  ></sup>
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" aria-label="Online" />
                 )}
               </div>
-              <div className="flex justify-end px-2 hidden">
-                <div className="cursor-pointer">
-                  <MdAddIcCall title="Voice Call" />
-                </div>
-                <div className="px-2 cursor-pointer">
-                  <FaVideo title="Video Call" />
+            ) : (
+              <div className="font-semibold tracking-wide text-white">Convo</div>
+            )}
+            <div className="flex items-center gap-1">
+              <CallControls conversation={user} currentUser={authUser} showButtons={Boolean(user)} />
+              {user && (
+                <button
+                  type="button"
+                  className="rounded-xl p-2 text-sm text-gray-300 hover:bg-[#263248]"
+                  onClick={handleEditOrViewModal}
+                  aria-label="Conversation details"
+                >
+                  ⋯
+                </button>
+              )}
+            </div>
+          </header>
+          {user ? (
+            messages?.length > 0 ? (
+              <Messages />
+            ) : (
+              <div className="grid flex-1 place-items-center text-center text-sm text-[#91a0b7]">
+                <div>
+                  <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-indigo-500/10 text-2xl text-indigo-300">✦</div>
+                  <p className="font-medium text-[#e8edf7]">Start the conversation</p>
+                  <p className="mt-1">Send a message, photo, or voice note.</p>
                 </div>
               </div>
-            </header>
+            )
+          ) : (
+            <div className="grid flex-1 place-items-center p-8 text-center">
+              <div>
+                <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-3xl bg-indigo-500/15 text-3xl text-indigo-300">✦</div>
+                <h1 className="text-xl font-semibold text-white">Your conversations, together</h1>
+                <p className="mt-2 max-w-sm text-sm text-[#91a0b7]">Choose a conversation to send messages, share files, or start a call.</p>
+              </div>
+            </div>
           )}
-          {messages?.length > 0 && <Messages />}
           {user && (
             <div>
               <form method="POST" onSubmit={sendMessage}>
-                <footer className="bg-white border-t border-gray-300 p-4 absolute bottom-0 w-4/6">
-                  <div className="flex items-center gap-x-2">
+                <footer className="message-composer">
+                  {attachment && (
+                    <div className="mb-2 flex items-center justify-between rounded-xl border border-[#263248] bg-[#182235] px-3 py-2 text-sm text-[#c7d2e3]">
+                      <span className="truncate">{attachment.name}</span>
+                      <button type="button" className="ml-3 text-rose-300" onClick={() => { setAttachment(null); setAttachmentError(""); }} aria-label="Remove attachment">×</button>
+                    </div>
+                  )}
+                  <ValidationError message={attachmentError} />
+                  <div className="flex items-center gap-2 rounded-2xl border border-[#263248] bg-[#0c1321] p-2 shadow-lg shadow-black/20">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,audio/*,video/mp4,video/webm,application/pdf"
+                      className="hidden"
+                      onChange={(event) => {
+                        setAttachment(event.target.files?.[0] || null);
+                        setAttachmentError("");
+                        event.target.value = "";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="rounded-xl p-3 text-[#91a0b7] hover:bg-[#263248] hover:text-white"
+                      onClick={() => fileInputRef.current?.click()}
+                      title="Attach a file"
+                      aria-label="Attach a file"
+                    >
+                      <FaPaperclip />
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-xl p-3 ${recording ? "text-rose-300" : "text-[#91a0b7] hover:bg-[#263248] hover:text-white"}`}
+                      onClick={toggleVoiceRecording}
+                      title={recording ? "Stop recording" : "Record voice note"}
+                      aria-label={recording ? "Stop recording" : "Record voice note"}
+                    >
+                      {recording ? <FiSquare /> : <FiMic />}
+                    </button>
                     <div className="relative w-full">
                       <div className="relative w-full">
                         {/* Input and Send Button Wrapper */}
@@ -317,33 +496,37 @@ const Home = () => {
                             <input
                               type="text"
                               placeholder="Type a message..."
-                              className="w-full p-2 pr-10 rounded-md border border-gray-400 focus:outline-none focus:border-blue-500"
-                              onChange={(e) => setMessage(e.target.value)}
+                              className="form-control pr-12"
+                              aria-invalid={Boolean(messageError)}
+                              onChange={(e) => { setMessage(e.target.value); setMessageError(""); }}
                               value={message}
                             />
                             {/* Emoji Picker Icon */}
-                            <img
-                              className="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer"
+                            <button
+                              type="button"
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-lg"
                               title="Choose emoji"
-                              src="https://icons.getbootstrap.com/assets/icons/emoji-smile.svg"
+                              aria-label="Choose emoji"
                               onClick={() => setShowPicker((val) => !val)}
-                              alt="Emoji Picker"
-                            />
+                            >
+                              🙂
+                            </button>
                           </div>
                           {/* Send Button */}
                           <button
                             type="submit"
-                            className={`ml-3 ${
+                            className={`ml-3 rounded-xl px-4 py-3 font-medium ${
                               message.trim()?.length > 0
-                                ? "bg-indigo-500"
-                                : "bg-indigo-200 cursor-not-allowed"
-                            } text-white px-4 py-2 rounded-md`}
-                            disabled={message.trim().length === 0}
-                            title={message.trim().length > 0 ? "Send" : ""}
+                                ? "bg-indigo-500 hover:bg-indigo-400"
+                                : "cursor-not-allowed bg-indigo-500/40"
+                            } text-white`}
+                            disabled={sending}
+                            title={message.trim().length > 0 || attachment ? "Send" : ""}
                           >
-                            Send
+                            {sending ? "Sending..." : "Send"}
                           </button>
                         </div>
+                        <ValidationError message={messageError} />
 
                         {/* Emoji Picker */}
                         {showPicker && (
@@ -361,7 +544,7 @@ const Home = () => {
               </form>
             </div>
           )}
-        </div>
+        </main>
       </div>
       <GroupEditOrViewModal
         isOpen={isModalOpen}

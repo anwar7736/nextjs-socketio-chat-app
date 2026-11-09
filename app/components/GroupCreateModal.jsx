@@ -13,6 +13,8 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     handleSubmit,
     watch,
     setValue,
+    setError,
+    clearErrors,
     formState: { errors },
   } = useForm();
   const [preview, setPreview] = useState('');
@@ -21,16 +23,20 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
   const [search, setSearch] = useState('');
   const [parent, setParent] = useState(false);
   const [isDisabled, setIsDisabled] = useState(false);
+  const [memberError, setMemberError] = useState("");
+  const [serverError, setServerError] = useState("");
   const { user, setUser } = useContext(AuthContext);
 
   const addGroupFormHandler = async (data) => {
     setIsDisabled(true);
     const filteredUsers = users.filter(user => user?.is_checked);
     if (filteredUsers.length === 0) {
-      toast.error('Please choose atleast one member!');
+      setMemberError("Choose at least one group member.");
       setIsDisabled(false);
       return;
     }
+    setMemberError("");
+    setServerError("");
     // const adminUsers = filteredUsers.filter(user => user?.is_admin);
     // if(adminUsers.length === 0){
     //   toast.error('Please choose atleast one admin!');
@@ -61,7 +67,14 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     }
     else {
       setIsDisabled(false);
-      toast.error(res.message);
+      const message = res.message || "Unable to create the group.";
+      if (message.toLowerCase().includes("name")) {
+        setError("name", { type: "server", message });
+      } else if (message.toLowerCase().includes("photo") || message.toLowerCase().includes("file") || message.toLowerCase().includes("image")) {
+        setError("photo", { type: "server", message });
+      } else {
+        setServerError(message);
+      }
     }
   }
 
@@ -80,6 +93,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     setParent(is_checked);
     const updatedUsers = users.map(user => ({ ...user, is_checked }));
     setUsers(updatedUsers);
+    if (is_checked) setMemberError("");
   }
 
   const handleChildChange = (user_id) => {
@@ -88,6 +102,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     );
 
     setUsers(updatedUsers);
+    if (updatedUsers.some((user) => user?.is_checked)) setMemberError("");
 
     const is_checked = updatedUsers.every(user => user?.is_checked);
     setParent(is_checked);
@@ -116,7 +131,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
   }
 
   return (
-    <form className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" onSubmit={handleSubmit(addGroupFormHandler)}>
+    <form className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" onSubmit={handleSubmit(addGroupFormHandler)} noValidate>
       <div className="print-container fixed inset-0 bg-gray-800 bg-opacity-50 flex items-center justify-center z-50">
         <div className="relative bg-white rounded-lg shadow-lg w-[600px] max-h-[90vh] p-6 overflow-y-auto">
           <button
@@ -144,6 +159,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
           <div align="center">
             <h1 className="font-bold">ADD NEW GROUP</h1>
             <div className="w-full max-w-md mt-5">
+              {serverError && <ValidationError message={serverError} />}
               <div className="mb-4">
                 <label className="block text-gray-700 text-sm font-bold mb-2 text-start" htmlFor="name">
                   Group Name <span className="text-red-600">*</span>
@@ -168,7 +184,8 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
                 <label className="block text-gray-700 text-sm font-bold mb-2 text-start" htmlFor="photo">
                   Photo
                 </label>
-                <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline" id="photo" type="file" placeholder="******************" onChange={(e) => handlePhotoChange(e.target.files[0])} />
+                <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline" id="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(e) => { clearErrors("photo"); handlePhotoChange(e.target.files[0]); }} />
+                {errors?.photo && <ValidationError message={errors?.photo?.message} />}
               </div>
               {
                 preview ?
@@ -247,6 +264,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
                   </tbody>
                 </table>
               </div>
+              <ValidationError message={memberError} />
             </div>
           </div>
 

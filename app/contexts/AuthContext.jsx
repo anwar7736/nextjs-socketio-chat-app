@@ -3,7 +3,7 @@ import { createContext, useEffect, useState } from "react";
 import { auth } from "../helpers/helper";
 export const AuthContext = createContext();
 const AuthContextProvider = ({children}) => {
-  const [user, setUser] = useState([]);
+  const [user, setUser] = useState("");
   useEffect(()=>{
     setUser(auth());
   }, []);

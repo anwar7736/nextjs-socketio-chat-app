@@ -23,29 +23,29 @@ const Users = ({ activeUsers }) => {
     <div>
       {
         users.length > 0 ? users?.map(u => {
-          return  (<div key={u?._id} className={`${u?._id == user?._id ? 'bg-gray-300' : ''} flex items-center mb-4 cursor-pointer hover:bg-gray-300 p-2 rounded-md`} onClick={() => getMessages(u)} >
-          <div className="w-12 h-12 bg-gray-300 rounded-full mr-" >
-              <img src={getImageURL(u?.photo)} alt="User Avatar" className="w-12 h-12 rounded-full border-2 border-red-400" title={u?.name}/>
+          return  (<button type="button" key={u?._id} className={`${u?._id == user?._id ? 'bg-[#222f46]' : ''} mb-2 flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-[#1b273b]`} onClick={() => getMessages(u)} >
+          <div className="h-11 w-11 shrink-0 rounded-full bg-[#263248]" >
+              <img src={getImageURL(u?.photo)} alt="" className="h-11 w-11 rounded-full border border-[#394761] object-cover" title={u?.name}/>
           </div>
           <div className="flex-1">
               <div className="flex">
-                  <div className="font-semibold cursor-pointer">
-                  <span className="ml-1 text-xs flex items-center justify-center">{u?.name}</span>
+                  <div className="flex min-w-0 items-center font-semibold">
+                  <span className="truncate text-sm text-[#e8edf7]">{u?.name}</span>
 
                       {
-                        activeUsers.includes(u?._id) && (<sup className="p-1 bg-green-500 ml-1 rounded" style={{ fontSize: "0px", marginBottom:"10px" }}></sup>)
+                        activeUsers.includes(u?._id) && (<sup className="ml-2 h-2 w-2 rounded-full bg-emerald-400" aria-label="Online" />)
                       }
                       {
                           u?.pending > 0 && 
-                          (<span className="px-1 bg-red-600 ml-1 rounded text-white text-xs">{u?.pending}</span>)
+                          (<span className="ml-auto rounded-full bg-indigo-500 px-2 py-0.5 text-xs text-white">{u?.pending}</span>)
                       }
                   </div>
               </div>
               {/* <p className="text-gray-600 text-xs">{user?.message}</p> */}
           </div>
-      </div>)
+      </button>)
         })
-        :  (<small className="text-red-600 text-sm">No User Found!</small>)
+        :  (<small className="text-sm text-[#91a0b7]">No conversations found.</small>)
       }
     </div>
   ) 

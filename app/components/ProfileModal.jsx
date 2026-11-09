@@ -2,17 +2,18 @@ import React, { useContext, useEffect, useState } from "react";
 import ValidationError from "./ValidationError";
 import { useForm } from "react-hook-form";
 import { toast } from "react-toastify";
-import { auth, getImageURL, socket_connection } from "../helpers/helper";
-import { setCookie } from "cookies-next";
+import { auth, getImageURL, setAuthProfile, socket_connection } from "../helpers/helper";
 import { AuthContext } from "../contexts/AuthContext";
+import TwoFactorSettings from "./TwoFactorSettings";
 const socket = socket_connection();
 const ProfileModal = ({ isOpen, onClose }) => {
-  if (!isOpen) return null;
   const {
     register,
     handleSubmit,
     watch,
     setValue,
+    setError,
+    clearErrors,
     formState: { errors },
   } = useForm();
   const [preview, setPreview] = useState(null);
@@ -30,23 +31,42 @@ const ProfileModal = ({ isOpen, onClose }) => {
     formData.append('password', data.password);
     formData.append('old_photo', auth()?.photo);
     formData.append('photo', photo);
-    let res = await fetch(`api/user/profile/${auth()?._id}`, {
-      method: "PUT",
-      body: formData
-    });
+    try {
+      let res = await fetch(`api/user/profile/${auth()?._id}`, {
+        method: "PUT",
+        body: formData
+      });
 
-    res = await res.json();
-    setIsDisabled(false);
-    if (res.success) {
-      res.data.message = `${user.name} updated his profile.`;
-      socket.emit("user-updated", JSON.stringify(res.data));
-      setCookie('auth', JSON.stringify(res.data));
-      setUser(auth());
-      onClose();
-      toast.success(res.message);
-    }
-    else {
-      toast.error(res.message);
+      res = await res.json();
+      if (res.success) {
+        socket.emit("user-updated", JSON.stringify({
+          _id: res.data._id,
+          name: res.data.name,
+          photo: res.data.photo,
+          message: `${user.name} updated their profile.`,
+        }));
+        setAuthProfile(res.data);
+        setUser(auth());
+        onClose();
+        toast.success(res.message);
+      }
+      else {
+        const message = res.message || "Unable to update your profile.";
+        const field = message.toLowerCase().includes("phone")
+          ? "phone"
+          : message.toLowerCase().includes("old password")
+            ? "old_password"
+            : message.toLowerCase().includes("password")
+              ? "password"
+              : message.toLowerCase().includes("photo") || message.toLowerCase().includes("file") || message.toLowerCase().includes("image")
+                ? "photo"
+                : "name";
+        setError(field, { type: "server", message });
+      }
+    } catch (error) {
+      setError("name", { type: "server", message: "Unable to reach the server. Please try again." });
+    } finally {
+      setIsDisabled(false);
     }
   }
 
@@ -62,8 +82,9 @@ const ProfileModal = ({ isOpen, onClose }) => {
   }
 
   useEffect(() => {
+    if (!isOpen) return;
     loadData();
-  }, []);
+  }, [isOpen, user]);
 
   const loadData = () => {
     setValue("name", user?.name);
@@ -71,6 +92,8 @@ const ProfileModal = ({ isOpen, onClose }) => {
     setValue("address", user?.address);
     setPreview(getImageURL(user?.photo));
   }
+
+  if (!isOpen) return null;
 
   return (
     <div className="print-container fixed inset-0 bg-gray-800 bg-opacity-50 flex items-center justify-center z-50">
@@ -97,7 +120,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
         </button>
 
 
-        <form className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" onSubmit={handleSubmit(profileFormHandler)}>
+        <form className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" onSubmit={handleSubmit(profileFormHandler)} noValidate>
           <div align="center">
             <h1 className="font-bold">MY PROFILE</h1>
             <div className="w-full max-w-xs">
@@ -118,7 +141,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
                 <label className="block text-gray-700 text-sm font-bold mb-2 text-start" htmlFor="phone">
                   Phone
                 </label>
-                <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline mb-1" id="phone" type="text" placeholder="Phone" {...register("phone", { required: 'Provide a valid phone number.', pattern: /^([+]{1}[8]{2}|0088)?(01)[3-9]\d{8}$/ })} />
+                <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline mb-1" id="phone" type="text" placeholder="Phone" {...register("phone", { required: 'Provide a valid phone number.', pattern: { value: /^([+]{1}[8]{2}|0088)?(01)[3-9]\d{8}$/, message: "Provide a valid phone number." } })} />
                 {errors?.phone && <ValidationError message={errors?.phone?.message} />}
               </div>
               <div className="mb-4">
@@ -133,10 +156,9 @@ const ProfileModal = ({ isOpen, onClose }) => {
                   Old Password
                 </label>
                 <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline" id="old_password" type="password" placeholder="******************" {...register("old_password", {
-                  required: false,
-                  minLength: {
-                    value: 4,
-                    message: 'Provide atleast 4 digits/characters.'
+                  validate: (value) => {
+                    if (value && !watch("password")) return "Enter a new password to change your password.";
+                    return !value || value.length >= 4 || "Enter at least 4 characters.";
                   }
                 })} />
                 {errors?.old_password && <ValidationError message={errors?.old_password?.message} />}
@@ -146,10 +168,10 @@ const ProfileModal = ({ isOpen, onClose }) => {
                   New Password
                 </label>
                 <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline" id="password" type="password" placeholder="******************" {...register("password", {
-                  required: false,
-                  minLength: {
-                    value: 4,
-                    message: 'Provide atleast 4 digits/characters.'
+                  validate: (value) => {
+                    if (value && !watch("old_password")) return "Enter your current password to set a new one.";
+                    if (watch("old_password") && value.length < 10) return "Use at least 10 characters.";
+                    return value.length <= 128 || "Use no more than 128 characters.";
                   }
                 })} />
                 {errors?.password && <ValidationError message={errors?.password?.message} />}
@@ -158,7 +180,8 @@ const ProfileModal = ({ isOpen, onClose }) => {
                 <label className="block text-gray-700 text-sm font-bold mb-2 text-start" htmlFor="photo">
                   Profile Photo
                 </label>
-                <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline" id="photo" type="file" placeholder="******************" onChange={(e) => handlePhotoChange(e.target.files[0])} />
+                <input className="shadow appearance-none border border-green-300 rounded w-full py-2 px-3 text-gray-700 mb-1 leading-tight focus:outline-none focus:shadow-outline" id="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(e) => { clearErrors("photo"); handlePhotoChange(e.target.files[0]); }} />
+                {errors?.photo && <ValidationError message={errors?.photo?.message} />}
               </div>
               <div className="mb-6">
                 <img src={preview} alt="Profile Photo" height={150} width={150} />
@@ -182,6 +205,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
             </button>
           </div>
         </form>
+        <TwoFactorSettings />
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import UserContextProvider, { UserWrapper } from "./contexts/UserContext";
 import MessageContextProvider from "./contexts/MessageContext";
 import AuthContextProvider from "./contexts/AuthContext";
 import UserListContextProvider from "./contexts/UserListContext";
+import PwaRegister from "./components/PwaRegister";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -19,8 +20,19 @@ const geistMono = localFont({
 });
 
 export const metadata = {
-  title: "Chat Application",
-  description: "Nextjs simple chat application",
+  title: "Convo — Real-time chat",
+  description: "Private and group conversations, wherever you are.",
+  manifest: "/manifest.json",
+  applicationName: "Convo",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Convo",
+  },
+};
+
+export const viewport = {
+  themeColor: "#090d17",
 };
 
 export default function RootLayout({ children }) {
@@ -29,6 +41,7 @@ export default function RootLayout({ children }) {
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <PwaRegister />
         <AuthContextProvider>
           <UserListContextProvider>
             <UserContextProvider>

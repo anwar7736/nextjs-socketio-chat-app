@@ -10,5 +10,8 @@ const groupMemberModel = new mongoose.Schema({
     timestamps: true
 });
 
+groupMemberModel.index({ user_id: 1, status: 1, group_id: 1 });
+groupMemberModel.index({ group_id: 1, status: 1 });
+
 export const groupMemberSchema = mongoose.models.group_members ||
 mongoose.model("group_members", groupMemberModel);

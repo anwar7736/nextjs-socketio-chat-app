@@ -1,44 +1,56 @@
-import { NextResponse } from "next/server";
-const { mongoDB_connect, auth } = require("@/app/helpers/helper");
+import { unlink } from "fs/promises";
+import { mongoDB_connect } from "@/app/helpers/helper";
+import { getSessionUserId } from "@/app/lib/session";
 import { messageSchema } from "@/app/models/messageModel";
-import mongoose from "mongoose";
 import { messageLogSchema } from "@/app/models/messageLogModel";
+import mongoose from "mongoose";
+import path from "path";
+import { NextResponse } from "next/server";
 
-mongoDB_connect();
-export async function PATCH(request, content) { //Unseen a message
-  let _id = content.params.id;
-  let success = false;
-  let message = "";
-  let data = [];
-  data = await messageLogSchema.updateOne({ _id }, { $set: { status: 2 } }); //2=>unseen
-  if (data.modifiedCount > 0) {
-    success = true;
-    message = "Message has been removed.";
-  }
+const objectIdPattern = /^[a-f\d]{24}$/i;
 
-  return NextResponse.json({ success, message, message_id: _id });
+export async function PATCH(request, context) {
+  const userId = await getSessionUserId(request);
+  const messageLogId = context.params.id;
+  if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+  if (!objectIdPattern.test(messageLogId)) return NextResponse.json({ success: false, message: "Invalid message." }, { status: 400 });
+
+  await mongoDB_connect();
+  const log = await messageLogSchema.findOneAndUpdate(
+    { _id: messageLogId, receiver_id: new mongoose.Types.ObjectId(userId) },
+    { $set: { status: 2 } },
+    { new: true }
+  );
+  if (!log) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
+  return NextResponse.json({ success: true, message: "Message hidden.", message_id: messageLogId });
 }
 
-export async function DELETE(request, content) {
-  let _id = content.params.id;
-  let success = false;
-  let message = "";
-  let msg_id = null;
-  let log = await messageLogSchema.findById(_id);
-  if(log)
-  {
-    msg_id = log?.message_id
-  }
-  let logsDeleted = await messageLogSchema.deleteMany({ message_id: msg_id });
-  if (logsDeleted) {
-    let msgDeleted = await messageSchema.deleteOne({ msg_id });
-    if (msgDeleted) {
-      success = true;
-      message = "Message has been removed.";
+export async function DELETE(request, context) {
+  const userId = await getSessionUserId(request);
+  const messageLogId = context.params.id;
+  if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+  if (!objectIdPattern.test(messageLogId)) return NextResponse.json({ success: false, message: "Invalid message." }, { status: 400 });
+
+  await mongoDB_connect();
+  const log = await messageLogSchema.findOne({
+    _id: messageLogId,
+    sender_id: new mongoose.Types.ObjectId(userId),
+  }).select("message_id");
+  if (!log) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
+
+  const message = await messageSchema.findOneAndDelete({
+    _id: log.message_id,
+    sender_id: new mongoose.Types.ObjectId(userId),
+  }).select("attachmentUrl");
+  if (!message) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
+  await messageLogSchema.deleteMany({ message_id: log.message_id });
+  const filename = message.attachmentUrl?.match(/^\/api\/attachments\/([a-f\d]{24})_([a-f\d-]{36}\.(?:jpg|png|gif|webp|webm|ogg|mp3|m4a|mp4|mov|pdf))$/i);
+  if (filename && filename[1] === userId) {
+    try {
+      await unlink(path.join(process.cwd(), "uploads", userId, filename[2]));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
   }
-
-
-  return NextResponse.json({ success, message, message_id: _id });
+  return NextResponse.json({ success: true, message: "Message removed.", message_id: messageLogId });
 }
-

@@ -1,15 +1,18 @@
 import { mongoDB_connect } from "@/app/helpers/helper";
 import { userSchema } from "@/app/models/userModel";
 import { NextResponse } from "next/server";
+import { getSessionUserId } from "@/app/lib/session";
 
-mongoDB_connect();
 export async function GET(request) {
-    let success = false;
-    const search = request.nextUrl.searchParams.get('search');
+    const userId = await getSessionUserId(request);
+    if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+    await mongoDB_connect();
+    const search = (request.nextUrl.searchParams.get('search') || '').slice(0, 100);
+    const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let data = await userSchema.aggregate([
         {
             $match: {
-                name: { $regex: new RegExp(search, 'i') },
+                name: { $regex: new RegExp(escapedSearch, 'i') },
                 status: 1
             },
         },
@@ -23,12 +26,8 @@ export async function GET(request) {
                 is_admin: { $literal: false },
             },
         },
+        { $limit: 200 },
     ]);
 
-    if(data)
-    {
-        success = true;
-    }
-    
-    return NextResponse.json({ success, data });
+    return NextResponse.json({ success: true, data });
 }

@@ -1,12 +1,11 @@
-const ValidationError = (props) => {
-    const message = props.message ?? 'This field is required.';
-  return (
-    <div>
-        <p className="text-red-500 text-sm text-start">
-            {message}
-        </p>
-    </div>
-  )
-}
+const ValidationError = ({ message }) => {
+  if (!message) return null;
 
-export default ValidationError
+  return (
+    <p className="mt-1 text-start text-sm text-red-500" role="alert">
+      {message}
+    </p>
+  );
+};
+
+export default ValidationError;

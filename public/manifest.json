@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "Convo — Real-time chat",
+  "short_name": "Convo",
+  "description": "Private and group conversations, wherever you are.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#090d17",
+  "theme_color": "#090d17",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

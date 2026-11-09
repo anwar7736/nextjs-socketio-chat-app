@@ -1,12 +1,18 @@
 import { userSchema } from "@/app/models/userModel";
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-const { mongoDB_connect, getImageURL } = require("@/app/helpers/helper");
-import { writeFile, unlink } from 'fs/promises';
+import mongoose from "mongoose";
+const { mongoDB_connect } = require("@/app/helpers/helper");
+import { getSessionUserId } from "@/app/lib/session";
+import { removeProfileImage, saveProfileImage } from "@/app/lib/profileImage";
 
-mongoDB_connect();
 export async function PUT(request, content) {
     let id = content.params.id;
+    const sessionUserId = await getSessionUserId(request);
+    if (!sessionUserId || id !== sessionUserId) {
+        return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 403 });
+    }
+    await mongoDB_connect();
     let success = false;
     let data = [];
     let message = "";
@@ -16,7 +22,6 @@ export async function PUT(request, content) {
     let old_password = request.get('old_password');
     let password = request.get('password');
     let address = request.get('address');
-    let old_photo = request.get('old_photo');
     let photo = request.get('photo');
     let inputs = {
         name,
@@ -37,7 +42,11 @@ export async function PUT(request, content) {
             message = "User not fond.";
             return NextResponse.json({ success, data, message });
         }
+        const old_photo = user.photo;
         if (old_password) {
+            if (typeof password !== "string" || password.length < 10 || password.length > 128) {
+                return NextResponse.json({ success: false, data: [], message: "New password must contain at least 10 characters." }, { status: 400 });
+            }
             const passwordMatched = await bcrypt.compare(old_password, user.password);
             if (!passwordMatched) {
                 success = false;
@@ -46,37 +55,16 @@ export async function PUT(request, content) {
 
             }
 
-            inputs.password = await bcrypt.hash(password, 10);
+            inputs.password = await bcrypt.hash(password, 12);
         }
 
         if (photo) {
-            let buffer;
-            if (photo.arrayBuffer) {
-                // For File or Blob objects
-                let byteData = await photo.arrayBuffer();
-                buffer = Buffer.from(byteData);
-            } else if (Buffer.isBuffer(photo)) {
-                // For already available Buffer
-                buffer = photo;
-                
+            try {
+                inputs.photo = await saveProfileImage(photo);
+            } catch (error) {
+                return NextResponse.json({ success: false, message: error.message }, { status: 400 });
             }
-
-            if(buffer)
-            {
-                let file_name = `${Math.floor(Math.random() * 9999999999)}_${photo.name || 'uploaded_file'}`;
-                let upload_path = getImageURL(file_name, 1);
-            
-                // Save the new file
-                await writeFile(upload_path, buffer);
-            
-                // Unlink the old photo if it exists
-                if (old_photo) {
-                    unlink(getImageURL(old_photo, 1));
-                }
-            
-                inputs.photo = file_name;
-            }
-        
+            if (old_photo) await removeProfileImage(old_photo);
         }
 
         data = await userSchema.updateOne({ _id: id }, { $set: inputs });
@@ -98,12 +86,11 @@ export async function PUT(request, content) {
 
 export async function GET(request, content) {
     let id = content.params.id;
-    let success = false;
-    let data = [];
-    data = await userSchema.findById(id);
-    if (data) {
-        success = true;
-    }
-
-    return NextResponse.json({ success, data });
+    const sessionUserId = await getSessionUserId(request);
+    if (!sessionUserId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+    if (!mongoose.isValidObjectId(id)) return NextResponse.json({ success: false, message: "Invalid user." }, { status: 400 });
+    await mongoDB_connect();
+    const data = await userSchema.findById(id, { name: 1, photo: 1 });
+    if (!data) return NextResponse.json({ success: false, message: "User not found." }, { status: 404 });
+    return NextResponse.json({ success: true, data });
 }
