@@ -19,6 +19,51 @@ import {
   socket_connection,
 } from "./helpers/helper";
 let socket = socket_connection();
+
+// must match the upload route (Vercel accepts request bodies up to about 4.5 MB)
+const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB) || 4;
+
+// Decode a photo (camera JPEG, HEIC where the browser can, …) and re-encode it as a JPEG that fits the upload limit.
+async function decodeImage(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      // some phones' camera files only decode through an <img>
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+async function shrinkImage(file, maxSide = 1920) {
+  const source = await decodeImage(file);
+  const width = source.width || source.naturalWidth;
+  const height = source.height || source.naturalHeight;
+  if (!width || !height) throw new Error("The photo has no size.");
+  const canvas = document.createElement("canvas");
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+  source.close?.();
+  const limit = (MAX_UPLOAD_MB - 0.5) * 1024 * 1024;
+  for (const quality of [0.85, 0.75, 0.6, 0.45]) {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (!blob) throw new Error("Image conversion failed.");
+    if (blob.size <= limit) return blob;
+  }
+  throw new Error("The photo is still too large after compression.");
+}
+
 const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
   const [activeUsers, setActiveUsers] = useState([]);
@@ -40,11 +85,21 @@ const Home = () => {
   const recordingTimerRef = useRef(null);
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
+  const emojiRef = useRef(null);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
-    setMessage((msg) => msg + emojiObject.emoji);
-    setShowPicker(false);
+    setMessage((msg) => msg + emojiObject.emoji); // picker stays open, like WhatsApp, for several emojis
   };
+
+  // a tap outside the emoji button/picker closes it
+  useEffect(() => {
+    if (!showPicker) return;
+    const close = (event) => {
+      if (!emojiRef.current?.contains(event.target)) setShowPicker(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [showPicker]);
 
   const getUserList = useCallback(async () => {
     let res = await fetch(
@@ -121,9 +176,12 @@ const Home = () => {
         const uploadData = new FormData();
         uploadData.append("file", attachment);
         const uploadResponse = await fetch("/api/upload", { method: "POST", body: uploadData });
-        const uploadResult = await uploadResponse.json();
+        // the host can refuse a too-large body before the app runs, with a non-JSON page
+        const uploadResult = await uploadResponse.json().catch(() => ({}));
         if (!uploadResponse.ok || !uploadResult.success) {
-          setAttachmentError(uploadResult.message || "Unable to upload this file.");
+          setAttachmentError(uploadResult.message || (uploadResponse.status === 413
+            ? `This file is too large. Files must be smaller than ${MAX_UPLOAD_MB} MB.`
+            : "Unable to upload this file. Please try again."));
           return;
         }
         uploaded = uploadResult.data;
@@ -156,6 +214,8 @@ const Home = () => {
         setMessage("");
         setReplyTarget(null);
         setAttachment(null);
+        setShowPicker(false);
+        if (messageInputRef.current) messageInputRef.current.style.height = "auto";
         // the socket server does not echo an event back to the tab that sent it
         setMessages(await loadMessages(user));
       } else {
@@ -399,29 +459,27 @@ const Home = () => {
     setReplyTarget(null);
   }, [user?._id]);
 
-  const chooseAttachment = async (file, optimizeImage = false) => {
+  // Phone camera photos are usually 3-12 MB, more than the server accepts (about 4 MB on Vercel):
+  // every photo that is large, or in a format the server does not take (HEIC …), becomes a JPEG of at most 1920 px.
+  const chooseAttachment = async (file) => {
     if (!file) return;
     setAttachmentError("");
+    const type = (file.type || "").toLowerCase();
     const supportedImageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i.test(file.name);
-    // Phone camera photos come through Attach now: shrink big ones (not GIFs, which would lose animation)
-    const isLargePhoto = isImage && file.size > 1.5 * 1024 * 1024 && file.type.toLowerCase() !== "image/gif";
-    if (isImage && (optimizeImage || isLargePhoto || !supportedImageTypes.includes(file.type.toLowerCase()))) {
+    const isImage = type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i.test(file.name);
+    const isLargePhoto = isImage && file.size > 1.5 * 1024 * 1024 && type !== "image/gif";
+    if (isImage && (isLargePhoto || !supportedImageTypes.includes(type))) {
       try {
-        const bitmap = await createImageBitmap(file);
-        const canvas = document.createElement("canvas");
-        const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
-        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-        canvas.getContext("2d").drawImage(bitmap, 0, 0);
-        bitmap.close();
-        const blob = await new Promise((resolve, reject) => {
-          canvas.toBlob((result) => result ? resolve(result) : reject(new Error("Image conversion failed.")), "image/jpeg", 0.9);
-        });
-        setAttachment(new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.jpg`, { type: "image/jpeg" }));
+        const blob = await shrinkImage(file);
+        setAttachment(new File([blob], `${(file.name || "photo").replace(/\.[^.]+$/, "")}.jpg`, { type: "image/jpeg" }));
       } catch (error) {
-        setAttachmentError("This camera image format is not supported by this browser. Choose JPEG or PNG.");
+        console.error("Unable to prepare the photo:", error);
+        setAttachmentError("This photo could not be prepared. Please try again, or choose it from the gallery.");
       }
+      return;
+    }
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setAttachmentError(`This file is too large. Files must be smaller than ${MAX_UPLOAD_MB} MB.`);
       return;
     }
     setAttachment(file);
@@ -517,7 +575,7 @@ const Home = () => {
           </header>
           {user ? (
             messages?.length > 0 ? (
-              <Messages />
+              <Messages key={user?._id} />
             ) : (
               <div className="grid flex-1 place-items-center text-center text-sm text-[#91a0b7]">
                 <div>
@@ -553,7 +611,7 @@ const Home = () => {
                       <button type="button" className="ml-3 shrink-0 text-base text-[#91a0b7]" onClick={() => setReplyTarget(null)} aria-label="Cancel reply">×</button>
                     </div>
                   )}
-                  <div className="composer-controls flex items-end gap-2 rounded-2xl border border-[#263248] bg-[#0c1321] p-2 shadow-lg shadow-black/20">
+                  <div className="composer-controls flex items-end gap-1 rounded-2xl border border-[#263248] bg-[#0c1321] p-1.5 shadow-lg shadow-black/20">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -566,28 +624,45 @@ const Home = () => {
                     />
                     <button
                       type="button"
-                      className="composer-action rounded-xl p-3 text-[#91a0b7] hover:bg-[#263248] hover:text-white"
+                      className="composer-action composer-icon"
                       onClick={() => fileInputRef.current?.click()}
-                      title="Attach a file"
+                      title="Attach a photo or file, or take a picture"
                       aria-label="Attach a file"
                     >
                       <FaPaperclip />
                     </button>
-                    <button
-                      type="button"
-                      className={`composer-action rounded-xl p-3 ${recording ? "text-rose-300" : "text-[#91a0b7] hover:bg-[#263248] hover:text-white"}`}
-                      onClick={toggleVoiceRecording}
-                      title={recording ? "Stop recording" : "Record voice note"}
-                      aria-label={recording ? "Stop recording" : "Record voice note"}
-                    >
-                      {recording ? <FiSquare /> : <FiMic />}
-                    </button>
-                    <div className="composer-action relative">
+                    <div className="composer-entry relative min-w-0 flex-1">
+                      <textarea
+                        ref={messageInputRef}
+                        rows={1}
+                        placeholder="Type a message"
+                        enterKeyHint="enter"
+                        className="form-control message-input min-h-11 resize-none"
+                        aria-invalid={Boolean(messageError)}
+                        onChange={(event) => {
+                          setMessage(event.target.value);
+                          setMessageError("");
+                          event.target.style.height = "auto";
+                          event.target.style.height = `${Math.min(event.target.scrollHeight, 140)}px`;
+                        }}
+                        onKeyDown={(event) => {
+                          // like WhatsApp: on a phone Enter adds a new line (send with the button);
+                          // on a computer Enter sends and Shift+Enter adds a new line
+                          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                          if (window.matchMedia?.("(pointer: coarse)").matches) return;
+                          event.preventDefault();
+                          sendMessage(event);
+                        }}
+                        value={message}
+                      />
+                    </div>
+                    <div className="composer-action relative" ref={emojiRef}>
                       <button
                         type="button"
-                        className="rounded-xl p-3 text-lg text-[#91a0b7] hover:bg-[#263248] hover:text-white"
+                        className={`composer-icon text-lg ${showPicker ? "is-active" : ""}`}
                         title="Choose emoji"
                         aria-label="Choose emoji"
+                        aria-expanded={showPicker}
                         onClick={() => setShowPicker((val) => !val)}
                       >
                         🙂
@@ -605,45 +680,29 @@ const Home = () => {
                         </div>
                       )}
                     </div>
-                    <div className="composer-entry relative min-w-0 flex-1">
-                      <div className="flex items-end gap-2">
-                        <textarea
-                          ref={messageInputRef}
-                          rows={1}
-                          placeholder="Type a message..."
-                          className="form-control message-input min-h-11 resize-none"
-                          aria-invalid={Boolean(messageError)}
-                          onChange={(event) => {
-                            setMessage(event.target.value);
-                            setMessageError("");
-                            event.target.style.height = "auto";
-                            event.target.style.height = `${Math.min(event.target.scrollHeight, 140)}px`;
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.shiftKey && window.innerWidth > 760) {
-                              event.preventDefault();
-                              sendMessage(event);
-                            }
-                          }}
-                          value={message}
-                        />
-                        <button
-                          type="submit"
-                          className={`composer-send flex shrink-0 items-center gap-2 rounded-xl px-4 py-3 font-medium ${
-                            message.trim().length > 0 || attachment
-                              ? "bg-indigo-500 hover:bg-indigo-400"
-                              : "cursor-not-allowed bg-indigo-500/40"
-                          } text-white`}
-                          disabled={sending || (!message.trim() && !attachment)}
-                          title="Send"
-                          aria-label="Send"
-                        >
-                          {sending ? "..." : <><FiSend className="composer-send-icon" /><span className="composer-send-label">Send</span></>}
-                        </button>
-                      </div>
-                      <ValidationError message={messageError} />
-                    </div>
+                    {message.trim().length > 0 || attachment ? (
+                      <button
+                        type="submit"
+                        className="composer-send"
+                        disabled={sending}
+                        title="Send"
+                        aria-label="Send"
+                      >
+                        {sending ? <span className="composer-spinner" aria-hidden="true" /> : <FiSend />}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`composer-send ${recording ? "is-recording" : ""}`}
+                        onClick={toggleVoiceRecording}
+                        title={recording ? "Stop recording" : "Record voice note"}
+                        aria-label={recording ? "Stop recording" : "Record voice note"}
+                      >
+                        {recording ? <FiSquare /> : <FiMic />}
+                      </button>
+                    )}
                   </div>
+                  <ValidationError message={messageError} />
                 </footer>
               </form>
             </div>

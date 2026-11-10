@@ -29,11 +29,13 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
     try {
       const activeSocket = socket_connection();
       if (activeSocket?.connected) {
-        activeSocket.emit("user-logout");
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        activeSocket.emit("user-logout"); // the server takes every tab of this user offline at once
+        await new Promise((resolve) => setTimeout(resolve, 150));
       }
       const response = await fetch("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("Unable to sign out. Please try again.");
+      // and this tab leaves for sure, so nobody keeps seeing it online until a reload
+      activeSocket?.disconnect();
       clearAuthProfile();
       setUser("");
       router.push("/auth");
@@ -42,19 +44,24 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
     }
   };
 
-  const enableNotifications = async () => {
+  const [showPushBanner, setShowPushBanner] = useState(false);
+  const pushSupported = () =>
+    typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+  // silent: re-register this device without asking or toasting (used on every app start once allowed)
+  const enableNotifications = async ({ silent = false } = {}) => {
     setIsDropdownOpen(false);
-    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-      toast.error("This browser does not support push notifications.");
+    if (!pushSupported()) {
+      if (!silent) toast.error("This browser does not support push notifications. On iPhone, add the app to the Home Screen first.");
       return;
     }
     try {
       const keyResponse = await fetch("/api/push-subscription", { cache: "no-store" });
-      const keyResult = await keyResponse.json();
+      const keyResult = await keyResponse.json().catch(() => ({}));
       if (!keyResponse.ok || !keyResult.success) {
         throw new Error(keyResult.message || "Push notifications are not configured.");
       }
-      const permission = Notification.permission === "default"
+      const permission = Notification.permission === "default" && !silent
         ? await Notification.requestPermission()
         : Notification.permission;
       if (permission !== "granted") throw new Error("Allow notifications in your browser settings to continue.");
@@ -70,12 +77,31 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(subscription),
       });
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success) throw new Error(result.message || "Unable to enable notifications.");
-      toast.success("Message notifications are enabled.");
+      setShowPushBanner(false);
+      if (!silent) toast.success("Message notifications are enabled.");
     } catch (error) {
-      toast.error(error.message || "Unable to enable notifications.");
+      if (!silent) toast.error(error.message || "Unable to enable notifications.");
+      else console.warn("Push notifications not re-registered:", error.message);
     }
+  };
+
+  useEffect(() => {
+    if (!user?._id || !pushSupported()) return;
+    if (Notification.permission === "granted") {
+      enableNotifications({ silent: true });
+    } else if (Notification.permission === "default") {
+      let dismissed = false;
+      try { dismissed = window.localStorage.getItem("push-banner-dismissed") === "1"; } catch {}
+      setShowPushBanner(!dismissed);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?._id]);
+
+  const dismissPushBanner = () => {
+    setShowPushBanner(false);
+    try { window.localStorage.setItem("push-banner-dismissed", "1"); } catch {}
   };
 
   const handleAddGroupModal = () => {
@@ -138,7 +164,7 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
             >
               <li>
                 <button
-                  onClick={enableNotifications}
+                  onClick={() => enableNotifications()}
                   className="flex w-full items-center px-4 py-3 text-left hover:bg-[#263248]"
                 >
                   <IoNotificationsOutline className="mr-2 text-indigo-300" />
@@ -178,6 +204,23 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {showPushBanner && (
+          <div className="push-banner mb-4" role="status">
+            <IoNotificationsOutline className="mt-0.5 shrink-0 text-lg text-indigo-300" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-white">Get message notifications</p>
+              <p className="mt-0.5 text-xs text-[#91a0b7]">See new messages on this device even when the app is closed.</p>
+              <div className="mt-2 flex gap-2">
+                <button type="button" className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-400" onClick={() => enableNotifications()}>
+                  Turn on
+                </button>
+                <button type="button" className="rounded-lg px-3 py-1.5 text-xs text-[#91a0b7] hover:bg-[#263248]" onClick={dismissPushBanner}>
+                  Not now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex justify-between">
           <input
             type="text"

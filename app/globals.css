@@ -142,61 +142,207 @@ textarea {
   box-shadow: 0 14px 40px rgb(0 0 0 / 30%);
 }
 
+/* ================= Modals (profile, add/edit group, conversation info) =================
+   One look for every .print-container dialog: fading backdrop, card that pops in on desktop and
+   slides up as a bottom sheet on phones, dark inputs, round close button, consistent buttons. */
 .print-container {
   position: fixed;
   inset: 0;
   z-index: 50;
-  display: grid;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   overflow-y: auto;
-  place-items: center;
-  background: rgb(2 6 23 / 78%);
+  background: rgb(2 6 23 / 72%) !important;
   padding: 16px;
-  backdrop-filter: blur(8px);
-  animation: overlay-fade-in 180ms ease-out both;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: overlay-fade-in 200ms ease-out both;
 }
 
 .print-container > div {
-  width: min(100%, 560px) !important;
-  max-height: min(90dvh, 880px);
+  position: relative;
+  width: min(100%, 520px) !important;
+  max-height: min(90dvh, 880px) !important;
   overflow-y: auto;
-  padding: clamp(18px, 4vw, 32px);
+  overscroll-behavior: contain;
+  padding: 26px 24px 22px !important;
   border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--surface);
+  border-radius: 22px !important;
+  background: linear-gradient(180deg, #151e30 0%, var(--surface) 140px) !important;
   color: var(--foreground);
-  animation: modal-rise-in 220ms cubic-bezier(.2, .8, .2, 1) both;
+  box-shadow: 0 30px 90px rgb(0 0 0 / 55%) !important;
+  animation: modal-pop-in 240ms cubic-bezier(.2, .9, .25, 1.1) both;
+  scrollbar-color: #394761 transparent;
 }
 
+/* a form around or inside the card should not add its own box */
+form:has(> .print-container),
 .print-container form.bg-white {
-  background: transparent;
-  box-shadow: none;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* the round close button in the corner */
+.print-container > div > button.absolute:first-child {
+  top: 14px !important;
+  right: 14px !important;
+  z-index: 2;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 999px;
+  background: #1c2639;
+  color: var(--muted) !important;
+}
+
+.print-container > div > button.absolute:first-child:hover {
+  background: #263248;
+  color: white !important;
+}
+
+.print-container > div > button.absolute:first-child svg {
+  width: 18px;
+  height: 18px;
+}
+
+.print-container h1 {
+  margin: 0 40px 20px;
+  color: white;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  text-align: center;
+}
+
+.print-container [align="center"] {
+  text-align: left;
+}
+
+.print-container .max-w-xs,
+.print-container .max-w-md {
+  max-width: none;
+}
+
+.print-container label.block {
+  margin-bottom: 6px !important;
+  color: #aab6ca !important;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.print-container .mb-4,
+.print-container .mb-6 {
+  margin-bottom: 14px;
+}
+
+.print-container input:not([type="checkbox"]):not([type="radio"]),
+.print-container textarea,
+.print-container select {
+  width: 100%;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  background: #0c1321 !important;
+  padding: 11px 13px !important;
+  color: var(--foreground) !important;
+  box-shadow: none !important;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.print-container input:not([type="checkbox"]):not([type="radio"]):focus,
+.print-container textarea:focus,
+.print-container select:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgb(129 140 248 / 16%) !important;
+}
+
+.print-container input::placeholder,
+.print-container textarea::placeholder {
+  color: #5f6f88;
+}
+
+.print-container input[type="file"] {
+  padding: 8px !important;
+  color: var(--muted) !important;
+  cursor: pointer;
+}
+
+.print-container input[type="file"]::file-selector-button {
+  margin-right: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: #263248;
+  padding: 7px 12px;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.print-container img[alt="Profile Photo"],
+.print-container .mb-6 > img {
+  width: 96px;
+  height: 96px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  object-fit: cover;
 }
 
 .print-container .text-gray-700,
 .print-container .text-gray-600,
 .print-container .text-gray-500 {
-  color: #c7d2e3;
+  color: #c7d2e3 !important;
 }
 
-.print-container input,
-.print-container textarea {
-  border-color: var(--border);
-  background: #0c1321;
-  color: var(--foreground);
+/* footer buttons: green = primary, red "Close" = secondary */
+.print-container .flex.justify-end.mt-6 {
+  gap: 10px;
+  margin-top: 22px;
 }
 
-.composer-send-icon {
-  display: none;
+.print-container .flex.justify-end.mt-6 > :not([hidden]) ~ :not([hidden]) {
+  margin-left: 0 !important;
 }
 
-@media (max-width: 760px) {
-  .composer-send-icon {
-    display: block;
-    font-size: 18px;
-  }
+.print-container .flex.justify-end.mt-6 > button,
+.print-container button.bg-red-600 {
+  min-height: 44px;
+  border-radius: 12px !important;
+  padding: 10px 18px !important;
+  font-weight: 600 !important;
 }
 
-/* member tables in the group modals: dark like the rest of the app (they used light-mode Tailwind classes) */
+.print-container .bg-green-500:not(span) {
+  background: var(--accent-strong) !important;
+  color: white;
+}
+
+.print-container .bg-green-500:not(span):hover:not(:disabled) {
+  background: #7c83f7 !important;
+}
+
+.print-container button.bg-red-600 {
+  border: 1px solid var(--border);
+  background: transparent !important;
+  color: #c7d2e3 !important;
+}
+
+.print-container button.bg-red-600:hover {
+  background: #1c2639 !important;
+  color: white !important;
+}
+
+/* danger actions keep red (delete / leave group) */
+.print-container button.bg-red-500,
+.print-container button.bg-rose-600 {
+  border-radius: 12px !important;
+}
+
 .print-container hr {
   margin: 20px 0 12px;
   border-color: var(--border);
@@ -208,6 +354,7 @@ textarea {
   color: var(--foreground);
 }
 
+/* member tables in the group modals */
 .print-container table {
   width: 100%;
   color: #c7d2e3;
@@ -242,6 +389,8 @@ textarea {
 }
 
 .print-container input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
   accent-color: var(--accent-strong);
 }
 
@@ -251,16 +400,139 @@ textarea {
   box-shadow: none;
 }
 
+/* phones: the dialog slides up from the bottom, full width */
+@media (max-width: 640px) {
+  .print-container {
+    align-items: flex-end !important;
+    padding: 0;
+  }
+
+  .print-container > div {
+    width: 100% !important;
+    max-height: 92dvh !important;
+    padding: 22px 16px max(18px, env(safe-area-inset-bottom)) !important;
+    border-width: 1px 0 0;
+    border-radius: 22px 22px 0 0 !important;
+    animation: sheet-up 280ms cubic-bezier(.2, .9, .3, 1) both;
+  }
+
+  /* the grab handle */
+  .print-container > div::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: #394761;
+    transform: translateX(-50%);
+  }
+
+  .print-container .flex.justify-end.mt-6 > button {
+    flex: 1 1 0;
+  }
+
+  .print-container th,
+  .print-container td {
+    padding: 8px !important;
+  }
+}
+
+/* ================= Composer: [📎] [ message … ] [🙂] [🎤 / ➤] ================= */
+.composer-icon {
+  display: grid;
+  width: 42px;
+  height: 44px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.composer-icon:hover,
+.composer-icon.is-active {
+  background: #1c2639;
+  color: white;
+}
+
+.composer-send {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  color: white;
+  font-size: 18px;
+  box-shadow: 0 6px 18px rgb(99 102 241 / 35%);
+  transition: background-color 140ms ease, transform 120ms ease;
+}
+
+.composer-send:hover:not(:disabled) {
+  background: #7c83f7;
+}
+
+.composer-send:active:not(:disabled) {
+  transform: scale(.94);
+}
+
+.composer-send:disabled {
+  opacity: .7;
+}
+
+.composer-send.is-recording {
+  background: #e11d48;
+  box-shadow: 0 0 0 0 rgb(225 29 72 / 50%);
+  animation: rec-pulse 1.2s ease-out infinite;
+}
+
+.composer-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgb(255 255 255 / 35%);
+  border-top-color: white;
+  border-radius: 999px;
+  animation: spin 700ms linear infinite;
+}
+
+.composer-entry textarea {
+  display: block;
+  border-color: transparent;
+  background: transparent;
+}
+
+.composer-entry textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.composer-controls:focus-within {
+  border-color: #3b4a68;
+}
+
 .emoji-picker-popover {
   position: absolute;
   z-index: 30;
-  left: 0;
+  right: 0;
   bottom: calc(100% + 12px);
   overflow: hidden;
   width: min(360px, calc(100vw - 28px));
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 18px;
   box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+  animation: modal-rise-in 160ms ease-out both;
+}
+
+.emoji-picker-popover .EmojiPickerReact {
+  --epr-bg-color: #111827;
+  --epr-category-label-bg-color: rgb(17 24 39 / 95%);
+  --epr-search-input-bg-color: #0c1321;
+  --epr-hover-bg-color: #263248;
+  --epr-picker-border-color: transparent;
+  border: 0 !important;
+  border-radius: 0 !important;
 }
 
 .message-input {
@@ -268,118 +540,499 @@ textarea {
   line-height: 1.45;
 }
 
+.push-banner {
+  display: flex;
+  gap: 12px;
+  border: 1px solid rgb(129 140 248 / 25%);
+  border-radius: 14px;
+  background: rgb(99 102 241 / 10%);
+  padding: 12px;
+  animation: modal-rise-in 200ms ease-out both;
+}
+
+/* ================= Selecting messages (press and hold, like WhatsApp) ================= */
 .message-selection-bar {
-  z-index: 2;
+  z-index: 3;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 20px;
+  gap: 8px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  background: #111827;
+  background: #151e30;
   color: var(--foreground);
+  animation: bar-down 160ms ease-out both;
 }
 
-.message-selection-bar button {
-  border-radius: 10px;
-  padding: 7px 10px;
+.selection-icon-button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 999px;
+  color: #c7d2e3;
+  font-size: 19px;
 }
 
-.message-selection-bar > button:first-child {
-  font-size: 20px;
+.selection-icon-button:hover:not(:disabled) {
+  background: #263248;
+  color: white;
 }
 
-.message-delete-selected {
-  margin-left: auto;
-  background: #be123c;
+.selection-icon-button.is-danger {
+  color: #fda4af;
+}
+
+.selection-icon-button.is-danger:hover:not(:disabled) {
+  background: rgb(225 29 72 / 18%);
+  color: #fecdd3;
+}
+
+.selection-icon-button:disabled {
+  opacity: .45;
+}
+
+.message-row {
+  margin-right: -8px;
+  margin-left: -8px;
+  border-radius: 14px;
+  padding: 4px 8px;
+  transition: background-color 140ms ease;
+}
+
+.message-row.is-selecting {
+  cursor: pointer;
 }
 
 .message-row.is-selected {
-  border-radius: 14px;
-  background: rgb(99 102 241 / 12%);
+  background: rgb(99 102 241 / 16%);
+}
+
+.message-bubble {
+  position: relative;
+  transition: transform 180ms ease;
+  -webkit-touch-callout: none;
+}
+
+.message-row.is-selected .message-bubble {
+  transform: scale(.98);
+}
+
+/* desktop: a small ⌄ on hover opens the same options as press-and-hold */
+.message-more-button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 28%);
+  color: white;
+  font-size: 14px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .message-bubble:hover .message-more-button {
+    display: grid;
+  }
+}
+
+.swipe-reply-hint {
+  position: absolute;
+  top: 50%;
+  left: -30px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  background: #263248;
+  color: white;
+  transform: translateY(-50%);
 }
 
 .message-action-anchor {
   position: relative;
 }
 
+/* the reaction bar above a held message */
 .message-action-menu {
   position: absolute;
   z-index: 25;
-  top: -8px;
+  top: -10px;
+  display: flex;
+  gap: 2px;
   width: max-content;
-  max-width: min(340px, calc(100vw - 36px));
+  max-width: calc(100vw - 24px);
   transform: translateY(-100%);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: #111827;
-  padding: 8px;
+  border-radius: 999px;
+  background: #1a2336;
+  padding: 5px 6px;
   box-shadow: 0 16px 40px rgb(0 0 0 / 45%);
-  animation: modal-rise-in 140ms ease-out both;
+  animation: reaction-pop 200ms cubic-bezier(.2, .9, .3, 1.3) both;
 }
 
 .message-action-menu button {
-  border-radius: 8px;
-  padding: 6px 8px;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 22px;
+  transition: transform 120ms ease, background-color 120ms ease;
 }
 
 .message-action-menu button:hover,
 .message-action-menu button:focus-visible {
   background: #263248;
+  transform: scale(1.18);
+}
+
+.message-action-menu button.is-active {
+  background: rgb(99 102 241 / 30%);
 }
 
 .message-reactions {
   position: absolute;
   z-index: 2;
-  bottom: -12px;
+  bottom: -14px;
   display: flex;
   gap: 4px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #111827;
-  padding: 2px 6px;
-  font-size: 11px;
+  background: #1a2336;
+  padding: 2px 7px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
 }
 
+/* ================= Photo preview ================= */
 .photo-preview-overlay {
   position: fixed;
   z-index: 80;
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgb(2 6 23 / 96%);
-  padding: 72px 18px 18px;
+  background: rgb(2 6 23 / 97%);
+  padding: 68px 12px 16px;
   animation: overlay-fade-in 160ms ease-out both;
 }
 
 .photo-preview-overlay img {
   max-width: 100%;
   max-height: 100%;
+  border-radius: 6px;
   object-fit: contain;
   animation: modal-rise-in 180ms ease-out both;
 }
 
-.photo-preview-back {
+.photo-preview-bar {
   position: absolute;
-  top: max(16px, env(safe-area-inset-top));
-  left: 16px;
+  top: 0;
+  right: 0;
+  left: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: #182235;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+  background: linear-gradient(rgb(2 6 23 / 90%), transparent);
+}
+
+.photo-preview-back {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(38 50 72 / 85%);
+  color: white;
+  font-size: 22px;
+}
+
+.photo-preview-back:hover {
+  background: #33415c;
+}
+
+/* ================= Calls (full screen, like WhatsApp) ================= */
+.call-overlay {
+  animation: overlay-fade-in 200ms ease-out both;
+}
+
+.call-screen {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: max(28px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at 50% 28%, rgb(99 102 241 / 28%), transparent 55%),
+    linear-gradient(180deg, #0f1629 0%, #070b14 100%);
   color: white;
 }
 
-.call-overlay {
-  animation: overlay-fade-in 180ms ease-out both;
+.call-screen.is-ended {
+  justify-content: center;
 }
 
-.call-dialog {
-  animation: modal-rise-in 220ms cubic-bezier(.2, .8, .2, 1) both;
+.call-hero {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 6vh;
+  text-align: center;
 }
 
+.call-hero.is-compact {
+  margin-top: 0;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 70%);
+}
+
+.call-kind {
+  margin-bottom: 22px;
+  color: #a5b4fc;
+  font-size: 13px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.call-hero.is-compact .call-kind {
+  margin-bottom: 4px;
+}
+
+.call-avatar {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  margin-bottom: 20px;
+  border-radius: 999px;
+}
+
+.call-avatar img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border: 3px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.call-avatar.is-ringing::before,
+.call-avatar.is-ringing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgb(129 140 248 / 35%);
+  animation: ring-wave 2s ease-out infinite;
+}
+
+.call-avatar.is-ringing::after {
+  animation-delay: 1s;
+}
+
+.call-name {
+  max-width: 88vw;
+  overflow: hidden;
+  font-size: 26px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-status {
+  margin-top: 6px;
+  color: #c7d2e3;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.call-status.is-ended {
+  color: #fda4af;
+  font-weight: 600;
+}
+
+.call-sub {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.call-actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(14px, 6vw, 28px);
+  border-radius: 28px;
+  background: rgb(15 22 41 / 72%);
+  padding: 16px 22px 12px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.call-actions.is-incoming {
+  gap: clamp(60px, 26vw, 140px);
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.call-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #c7d2e3;
+  font-size: 12px;
+}
+
+.call-round {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 12%);
+  color: white;
+  font-size: 22px;
+  transition: transform 120ms ease, background-color 140ms ease;
+}
+
+.call-round:hover:not(:disabled) {
+  background: rgb(255 255 255 / 20%);
+}
+
+.call-round:active:not(:disabled) {
+  transform: scale(.92);
+}
+
+.call-round.is-on {
+  background: white;
+  color: #0f1629;
+}
+
+.call-round.is-end {
+  background: #e11d48;
+}
+
+.call-round.is-end:hover:not(:disabled) {
+  background: #f43f5e;
+}
+
+.call-round.is-accept {
+  background: #16a34a;
+  animation: accept-bounce 1.4s ease-in-out infinite;
+}
+
+.call-round.is-accept:hover:not(:disabled) {
+  background: #22c55e;
+}
+
+.call-actions.is-incoming .call-round {
+  width: 68px;
+  height: 68px;
+  font-size: 26px;
+}
+
+.call-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  background: black;
+}
+
+.call-stage.is-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 4px;
+}
+
+.call-tile {
+  position: relative;
+  overflow: hidden;
+}
+
+.call-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.call-stage.is-grid .call-tile video {
+  object-fit: contain;
+}
+
+.call-tile span {
+  position: absolute;
+  bottom: 110px;
+  left: 12px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 50%);
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.call-self-view {
+  position: absolute;
+  z-index: 3;
+  top: max(84px, calc(env(safe-area-inset-top) + 70px));
+  right: 14px;
+  width: clamp(96px, 26vw, 200px);
+  aspect-ratio: 3 / 4;
+  border: 2px solid rgb(255 255 255 / 25%);
+  border-radius: 16px;
+  background: #111827;
+  object-fit: cover;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+}
+
+.call-screen:not(.has-video) .call-self-view {
+  display: none;
+}
+
+.call-self-view.is-mirrored {
+  transform: scaleX(-1);
+}
+
+.call-self-view.is-off {
+  opacity: .25;
+}
+
+/* ================= SweetAlert (confirm dialogs) ================= */
+body.swal2-shown .swal2-popup {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--foreground);
+  animation: modal-pop-in 220ms cubic-bezier(.2, .9, .25, 1.1) both;
+}
+
+body.swal2-shown .swal2-title,
+body.swal2-shown .swal2-html-container {
+  color: var(--foreground);
+}
+
+body.swal2-shown .swal2-html-container {
+  color: #aab6ca;
+  font-size: 15px;
+}
+
+body.swal2-shown .swal2-actions button {
+  border-radius: 12px !important;
+  padding: 10px 20px !important;
+}
+
+/* ================= Animations ================= */
 @keyframes overlay-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -390,17 +1043,43 @@ textarea {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-body.swal2-shown .swal2-popup {
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--surface);
-  color: var(--foreground);
-  animation: modal-rise-in 200ms ease-out both;
+@keyframes modal-pop-in {
+  from { opacity: 0; transform: translateY(14px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-body.swal2-shown .swal2-title,
-body.swal2-shown .swal2-html-container {
-  color: var(--foreground);
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes bar-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes reaction-pop {
+  from { opacity: 0; transform: translateY(-80%) scale(.7); }
+  to { opacity: 1; transform: translateY(-100%) scale(1); }
+}
+
+@keyframes ring-wave {
+  from { opacity: .9; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.7); }
+}
+
+@keyframes accept-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes rec-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(225 29 72 / 50%); }
+  100% { box-shadow: 0 0 0 14px rgb(225 29 72 / 0%); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 760px) {
@@ -435,73 +1114,43 @@ body.swal2-shown .swal2-html-container {
     padding: 18px 14px 130px;
   }
 
-  /* one tight row: [clip][mic][emoji][ message box ...... ][send] */
+  /* one tight row: [📎] [ message box ……… ] [🙂] [🎤/➤] */
   .message-composer {
-    padding: 8px 6px max(8px, env(safe-area-inset-bottom));
+    padding: 6px 6px max(8px, env(safe-area-inset-bottom));
   }
 
   .composer-controls {
-    display: flex;
     flex-wrap: nowrap;
-    align-items: flex-end;
-    gap: 0;
+    gap: 2px;
     padding: 4px;
-    border-radius: 18px;
+    border-radius: 24px;
   }
 
-  .composer-action {
-    flex: 0 0 auto;
-    padding: 0;
-  }
-
-  .composer-controls > button.composer-action,
-  .composer-action > button {
-    display: grid;
-    width: 36px;
-    height: 44px;
-    place-items: center;
-    padding: 0;
-  }
-
-  .composer-entry {
-    flex: 1 1 auto;
-    min-width: 0;
-    margin-left: 2px;
-  }
-
-  .composer-entry > div.flex {
-    gap: 4px;
+  .composer-icon {
+    width: 38px;
   }
 
   .composer-entry textarea {
-    min-width: 0;
-    flex: 1 1 auto;
-    padding: 10px 12px;
+    padding: 10px 6px;
   }
 
-  .composer-send {
-    width: 44px;
-    height: 44px;
-    justify-content: center;
-    padding: 0 !important;
-  }
-
-  .composer-send-label {
-    display: none;
-  }
-
-  /* the emoji button sits at the far left: open the picker across the screen, above the composer */
+  /* the picker opens across the screen, above the composer */
   .emoji-picker-popover {
     position: fixed;
     right: 8px;
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    bottom: calc(68px + env(safe-area-inset-bottom));
     left: 8px;
     width: auto;
   }
 
   .message-selection-bar {
-    padding-right: 12px;
-    padding-left: 12px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .call-avatar {
+    width: 116px;
+    height: 116px;
   }
 
   .auth-shell {
@@ -534,5 +1183,50 @@ body.swal2-shown .swal2-html-container {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ↓ scroll to the newest message (shown after scrolling up, with a count of new ones) */
+.jump-to-bottom {
+  position: absolute;
+  z-index: 4;
+  right: 18px;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #1a2336;
+  color: white;
+  font-size: 22px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  animation: modal-rise-in 160ms ease-out both;
+}
+
+.jump-to-bottom:hover {
+  background: #263248;
+}
+
+.jump-badge {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .jump-to-bottom {
+    right: 12px;
+    bottom: calc(78px + env(safe-area-inset-bottom));
   }
 }

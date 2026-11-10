@@ -3,6 +3,7 @@ import { getSessionUserId } from "@/app/lib/session";
 import { messageSchema } from "@/app/models/messageModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
+import { groupSchema } from "@/app/models/groupModel";
 import { userSchema } from "@/app/models/userModel";
 import { sendPushNotification } from "@/app/lib/pushNotifications";
 import mongoose from "mongoose";
@@ -185,13 +186,21 @@ export async function POST(request) {
     });
   }
 
+  // Notification like WhatsApp: "<sender>" (or "<sender> @ <group>") with the text; tapping it opens that chat.
+  // For a direct message the chat to open on the receiver's phone is the SENDER's (receiver_id is the receiver).
   const pushRecipients = (isGroup ? recipientIds : [receiver_id]).filter((id) => id !== sessionUserId);
   const notificationBody = text || (type === "image" ? "📷 Photo" : type === "audio" ? "🎤 Voice message" : type === "video" ? "🎥 Video" : "📎 Attachment");
+  const ticketId = isGroup ? receiver_id : sessionUserId;
+  const [senderInfo, groupInfo] = await Promise.all([
+    userSchema.findById(senderId).select("name").lean(),
+    isGroup ? groupSchema.findById(receiverId).select("name").lean() : null,
+  ]).catch(() => [null, null]);
+  const senderName = senderInfo?.name || "New message";
   await sendPushNotification(pushRecipients, {
-    title: "New message",
+    title: isGroup ? `${senderName} @ ${groupInfo?.name || "Group"}` : senderName,
     body: notificationBody.slice(0, 180),
-    url: `/?ticket=${encodeURIComponent(receiver_id)}&is_group=${isGroup ? "1" : "0"}`,
-    tag: `message-${receiver_id}`,
+    url: `/?ticket=${encodeURIComponent(ticketId)}&is_group=${isGroup ? "1" : "0"}`,
+    tag: `message-${ticketId}`,
   }).catch((error) => console.error("Unable to prepare a Web Push notification:", error));
 
   return NextResponse.json({

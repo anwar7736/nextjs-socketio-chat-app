@@ -44,6 +44,8 @@ export async function GET(request) {
     success: true,
     enabled: false,
     qrCode: await QRCode.toDataURL(totp.toString()),
+    // the same secret the QR holds, for typing into an app by hand; only while setup is pending
+    manualKey: user.pendingTwoFactorSecret,
   });
 }
 

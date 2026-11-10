@@ -1,4 +1,4 @@
-const CACHE_NAME = "convo-shell-v1";
+const CACHE_NAME = "convo-shell-v2";
 const APP_SHELL = ["/auth", "/manifest.json", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -56,27 +56,39 @@ self.addEventListener("push", (event) => {
   }
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    if (windows.some((client) => client.focused)) return;
+    // the app is open and in front: it shows the message itself
+    if (windows.some((client) => client.focused && client.visibilityState === "visible")) return;
     await self.registration.showNotification(payload.title || "New message", {
       body: payload.body || "You have a new message.",
       icon: "/icons/icon.svg",
       badge: "/icons/icon.svg",
       tag: payload.tag || "convo-message",
+      renotify: true,          // a new message in the same chat buzzes again
+      vibrate: [120, 60, 120],
+      timestamp: Date.now(),
       data: { url: payload.url || "/" },
     });
   })());
 });
 
+// Tapping a notification opens that chat: in the open app if there is one, otherwise in a new window.
+// (Signed out: the app sends the user to sign in and back to this chat afterwards.)
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const target = new URL(event.notification.data?.url || "/", self.location.origin);
   if (target.origin !== self.location.origin) return;
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    for (const client of windows) {
-      if ("navigate" in client) await client.navigate(target.href);
-      return client.focus();
+    const client = windows.find((item) => new URL(item.url).origin === self.location.origin);
+    if (client) {
+      try {
+        await client.focus();
+        client.postMessage({ type: "open-url", url: target.pathname + target.search });
+        return;
+      } catch {
+        // could not reach that window: open a new one
+      }
     }
-    return self.clients.openWindow(target.href);
+    await self.clients.openWindow(target.href);
   })());
 });

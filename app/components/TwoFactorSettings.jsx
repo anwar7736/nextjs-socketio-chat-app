@@ -7,6 +7,8 @@ import ValidationError from "./ValidationError";
 export default function TwoFactorSettings() {
   const [enabled, setEnabled] = useState(false);
   const [qrCode, setQrCode] = useState("");
+  const [manualKey, setManualKey] = useState("");
+  const [copied, setCopied] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [codeError, setCodeError] = useState("");
@@ -17,6 +19,31 @@ export default function TwoFactorSettings() {
     if (!response.ok) throw new Error(result.message || "Unable to load security settings.");
     setEnabled(result.enabled);
     setQrCode(result.qrCode || "");
+    setManualKey(result.manualKey || "");
+  };
+
+  const copyManualKey = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(manualKey);
+      } else {
+        // older browsers / non-https: copy through a hidden field
+        const field = document.createElement("textarea");
+        field.value = manualKey;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        document.execCommand("copy");
+        field.remove();
+      }
+      setCopied(true);
+      toast.success("Setup key copied.");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Could not copy. Select the key and copy it by hand.");
+    }
   };
 
   useEffect(() => {
@@ -68,6 +95,25 @@ export default function TwoFactorSettings() {
         <div className="mt-4 flex flex-col items-center rounded-xl bg-white p-3">
           <img src={qrCode} alt="Scan this QR code with your authenticator app" className="h-40 w-40" />
           <p className="mt-2 text-center text-xs text-slate-600">Scan with an authenticator app, then enter its current code below.</p>
+        </div>
+      )}
+
+      {!enabled && manualKey && (
+        <div className="mt-3">
+          <p className="text-xs text-[#91a0b7]">Can&apos;t scan? Enter this setup key in your authenticator app:</p>
+          <div className="mt-2 flex items-center gap-2 rounded-xl border border-[#263248] bg-[#111827] p-2 pl-3">
+            <code className="min-w-0 flex-1 select-all break-all font-mono text-sm tracking-wider text-white">
+              {manualKey.match(/.{1,4}/g)?.join(" ")}
+            </code>
+            <button
+              type="button"
+              onClick={copyManualKey}
+              className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-white ${copied ? "bg-emerald-600" : "bg-indigo-500 hover:bg-indigo-400"}`}
+              aria-label="Copy setup key"
+            >
+              {copied ? "Copied ✓" : "Copy"}
+            </button>
+          </div>
         </div>
       )}
 

@@ -1,16 +1,81 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FaVideo } from "react-icons/fa";
+import { FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiVideo, FiVideoOff } from "react-icons/fi";
 import { MdAddIcCall } from "react-icons/md";
 import { toast } from "react-toastify";
-import { socket_connection } from "../helpers/helper";
+import { UserListContext } from "../contexts/UserListContext";
+import { getImageURL, socket_connection } from "../helpers/helper";
 
 const socket = socket_connection();
+const END_SCREEN_MS = 1800; // how long "Line busy", "Call ended 01:23" … stay on screen
+
+const formatTime = (seconds) =>
+  `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+/* ---------- ringtones (generated once, no audio files needed) ---------- */
+
+// a mono 16-bit WAV of tone segments: [frequencies[], seconds] ([] = silence)
+function makeToneUrl(segments, sampleRate = 16000) {
+  const total = segments.reduce((sum, [, seconds]) => sum + Math.round(seconds * sampleRate), 0);
+  const buffer = new ArrayBuffer(44 + total * 2);
+  const view = new DataView(buffer);
+  const write = (offset, text) => [...text].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
+  write(0, "RIFF"); view.setUint32(4, 36 + total * 2, true); write(8, "WAVE"); write(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, "data"); view.setUint32(40, total * 2, true);
+  let offset = 44;
+  for (const [freqs, seconds] of segments) {
+    const count = Math.round(seconds * sampleRate);
+    for (let i = 0; i < count; i += 1) {
+      let value = 0;
+      if (freqs.length) {
+        const t = i / sampleRate;
+        const fade = Math.min(1, i / 400, (count - i) / 400); // no clicks at the edges
+        value = freqs.reduce((sum, f) => sum + Math.sin(2 * Math.PI * f * t), 0) / freqs.length * 0.35 * fade;
+      }
+      view.setInt16(offset, value * 32767, true);
+      offset += 2;
+    }
+  }
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+}
+
+let tones = null;
+function getTones() {
+  if (!tones && typeof window !== "undefined") {
+    tones = {
+      // incoming: a bright two-note phrase, repeated
+      ring: makeToneUrl([[[784], 0.18], [[], 0.06], [[988], 0.18], [[], 0.06], [[784], 0.18], [[], 0.06], [[988], 0.3], [[], 1.4]]),
+      // outgoing ringback, the classic "tuuut … tuuut"
+      ringback: makeToneUrl([[[440, 480], 1.2], [[], 2.4]]),
+      // busy / ended: three short beeps
+      busy: makeToneUrl([[[480, 620], 0.25], [[], 0.25], [[480, 620], 0.25], [[], 0.25], [[480, 620], 0.25], [[], 0.1]]),
+    };
+  }
+  return tones;
+}
+
+function useTone(kind, playing, loop = true) {
+  useEffect(() => {
+    if (!playing || !kind) return;
+    const audio = new Audio(getTones()[kind]);
+    audio.loop = loop;
+    audio.play().catch(() => {}); // browsers may refuse sound before the first tap; vibration/notification still work
+    return () => {
+      audio.pause();
+      audio.src = "";
+    };
+  }, [kind, playing, loop]);
+}
 
 export default function CallControls({ conversation, currentUser, showButtons = true }) {
+  const { users } = useContext(UserListContext) || {};
   const [incoming, setIncoming] = useState(null);
   const [call, setCall] = useState(null);
+  const [ended, setEnded] = useState(null); // { title, subtitle, name, photo } shown briefly after a call
   const [remoteStreams, setRemoteStreams] = useState({});
   const [busy, setBusy] = useState(false);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
@@ -18,19 +83,31 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const peersRef = useRef(new Map());
   const pendingCandidatesRef = useRef(new Map());
   const callRef = useRef(null);
-  const ringtoneRef = useRef(null);
+  const endTimerRef = useRef(null);
   const iceServersRef = useRef([{ urls: "stun:stun.l.google.com:19302" }]);
   const currentUserIdRef = useRef(currentUser?._id);
   currentUserIdRef.current = currentUser?._id;
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [facingMode, setFacingMode] = useState("user");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
+  const personFor = useCallback((id) => (Array.isArray(users) ? users.find((item) => item?._id === id) : null), [users]);
+
   const loadIceServers = useCallback(async () => {
-    const response = await fetch("/api/calls/ice-servers");
-    const result = await response.json();
-    if (!response.ok || !result.success) throw new Error(result.message || "Unable to load call network settings.");
-    iceServersRef.current = result.iceServers;
+    try {
+      const response = await fetch("/api/calls/ice-servers");
+      const result = await response.json();
+      if (response.ok && result.success && Array.isArray(result.iceServers)) iceServersRef.current = result.iceServers;
+    } catch {
+      // keep the public STUN default
+    }
+  }, []);
+
+  const showEnded = useCallback((title, subtitle, info, tone = false) => {
+    clearTimeout(endTimerRef.current);
+    setEnded({ title, subtitle, ...info, tone });
+    endTimerRef.current = setTimeout(() => setEnded(null), END_SCREEN_MS);
   }, []);
 
   const stopCall = useCallback((notify = true) => {
@@ -46,6 +123,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     setRemoteStreams({});
     setMuted(false);
     setCameraOff(false);
+    setFacingMode("user");
+  }, []);
+
+  const removePeer = useCallback((peerId) => {
+    peersRef.current.get(peerId)?.close();
+    peersRef.current.delete(peerId);
+    pendingCandidatesRef.current.delete(peerId);
+    setRemoteStreams((streams) => {
+      const next = { ...streams };
+      delete next[peerId];
+      return next;
+    });
   }, []);
 
   const makePeer = useCallback((peerId, callId) => {
@@ -55,11 +144,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     localStreamRef.current?.getTracks().forEach((track) => peer.addTrack(track, localStreamRef.current));
     peer.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.emit("call:signal", {
-          callId,
-          to: peerId,
-          signal: { candidate: event.candidate.toJSON() },
-        });
+        socket.emit("call:signal", { callId, to: peerId, signal: { candidate: event.candidate.toJSON() } });
       }
     };
     peer.ontrack = (event) => {
@@ -89,18 +174,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
     peersRef.current.set(peerId, peer);
     return peer;
-  }, []);
-
-  const removePeer = useCallback((peerId) => {
-    peersRef.current.get(peerId)?.close();
-    peersRef.current.delete(peerId);
-    pendingCandidatesRef.current.delete(peerId);
-    setRemoteStreams((streams) => {
-      const next = { ...streams };
-      delete next[peerId];
-      return next;
-    });
-  }, []);
+  }, [removePeer]);
 
   const toggleTrack = (kind) => {
     const tracks = kind === "audio" ? localStreamRef.current?.getAudioTracks() : localStreamRef.current?.getVideoTracks();
@@ -109,6 +183,31 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     tracks.forEach((track) => { track.enabled = enabled; });
     if (kind === "audio") setMuted(!enabled);
     else setCameraOff(!enabled);
+  };
+
+  // front <-> back camera during a video call
+  const flipCamera = async () => {
+    const stream = localStreamRef.current;
+    const oldTrack = stream?.getVideoTracks()[0];
+    if (!oldTrack) return;
+    const nextMode = facingMode === "user" ? "environment" : "user";
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextMode } });
+      const newTrack = fresh.getVideoTracks()[0];
+      newTrack.enabled = oldTrack.enabled;
+      for (const peer of peersRef.current.values()) {
+        const sender = peer.getSenders().find((item) => item.track?.kind === "video");
+        await sender?.replaceTrack(newTrack);
+      }
+      stream.removeTrack(oldTrack);
+      oldTrack.stop();
+      stream.addTrack(newTrack);
+      setFacingMode(nextMode);
+      const element = document.getElementById("local-call-stream");
+      if (element) element.srcObject = stream;
+    } catch {
+      toast.error("This device has no other camera.");
+    }
   };
 
   const flushCandidates = useCallback(async (peerId, peer) => {
@@ -121,13 +220,43 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const openMedia = async (video) => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Audio and video calls require a secure browser connection.");
+      throw new Error("Audio and video calls need a secure (https) connection.");
     }
-    return navigator.mediaDevices.getUserMedia({ audio: true, video });
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: video ? { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+      });
+    } catch (error) {
+      if (error?.name === "NotAllowedError") {
+        throw new Error(video ? "Allow camera and microphone access to make video calls." : "Allow microphone access to make calls.");
+      }
+      if (error?.name === "NotFoundError") throw new Error(video ? "No camera or microphone was found." : "No microphone was found.");
+      if (error?.name === "NotReadableError") throw new Error("The camera or microphone is being used by another app.");
+      throw error;
+    }
   };
 
+  const notifyMissed = useCallback((active, recipients) => {
+    if (!active?.isCaller || !recipients?.length) return;
+    fetch("/api/calls/missed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: active.conversationId,
+        is_group: active.isGroup ? 1 : 0,
+        is_video: active.isVideo,
+        recipient_ids: recipients,
+      }),
+    }).catch(() => {});
+  }, []);
+
   const startCall = async (video) => {
-    if (!conversation?._id || !currentUser?._id || !socket.connected || busy) return;
+    if (!conversation?._id || !currentUser?._id || busy || callRef.current) return;
+    if (!socket.connected) {
+      toast.error("Not connected. Check your internet connection and try again.");
+      return;
+    }
     setBusy(true);
     try {
       let recipients;
@@ -148,10 +277,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       const activeCall = {
         callId: crypto.randomUUID(),
         isVideo: video,
+        isCaller: true,
         callerId: currentUser._id,
         callerName: currentUser.name,
+        conversationId: conversation._id,
         conversationName: conversation.name,
+        photo: conversation.photo,
         isGroup: conversation.is_group === 1,
+        recipients,
         status: "calling",
         startedAt: Date.now(),
       };
@@ -179,52 +312,87 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       const stream = await openMedia(incoming.isVideo);
       await loadIceServers();
       localStreamRef.current = stream;
-      const activeCall = { ...incoming, isCaller: false, status: "connecting" };
+      const caller = personFor(incoming.callerId);
+      const activeCall = {
+        ...incoming,
+        isCaller: false,
+        photo: caller?.photo,
+        status: "connecting",
+        startedAt: Date.now(),
+      };
       callRef.current = activeCall;
       setCall(activeCall);
       setIncoming(null);
       socket.emit("call:accept", { callId: incoming.callId, callerId: incoming.callerId });
     } catch (error) {
       toast.error(error.message || "Unable to join the call.");
+      socket.emit("call:reject", { callId: incoming.callId, callerId: incoming.callerId });
+      setIncoming(null);
     } finally {
       setBusy(false);
     }
   };
 
-  useEffect(() => {
-    if (!incoming) {
-      clearInterval(ringtoneRef.current?.interval);
-      ringtoneRef.current?.context.close().catch(() => {});
-      ringtoneRef.current = null;
-      return;
-    }
+  const declineCall = () => {
+    if (!incoming) return;
+    socket.emit("call:reject", { callId: incoming.callId, callerId: incoming.callerId });
+    setIncoming(null);
+  };
 
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) return;
-    const context = new AudioContextClass();
-    const beep = () => {
-      if (context.state !== "running") return;
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.frequency.value = 480;
-      gain.gain.setValueAtTime(0.0001, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.45);
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start();
-      oscillator.stop(context.currentTime + 0.46);
-    };
-    context.resume().then(beep).catch(() => {});
-    const interval = setInterval(beep, 1400);
-    ringtoneRef.current = { context, interval };
+  const hangUp = () => {
+    const active = callRef.current;
+    if (!active) return;
+    const connectedFor = active.connectedAt ? Math.floor((Date.now() - active.connectedAt) / 1000) : null;
+    if (active.isCaller && !active.connectedAt) notifyMissed(active, active.recipients);
+    stopCall();
+    showEnded(connectedFor != null ? "Call ended" : "Call cancelled", connectedFor != null ? formatTime(connectedFor) : "", {
+      name: active.isGroup || active.isCaller ? active.conversationName : active.callerName,
+      photo: active.photo,
+    });
+  };
+
+  /* ---------- sounds & vibration ---------- */
+  useTone("ring", Boolean(incoming));
+  useTone("ringback", call?.status === "ringing");
+  useTone("busy", Boolean(ended?.tone), false);
+
+  useEffect(() => {
+    if (!incoming || !navigator.vibrate) return;
+    navigator.vibrate([400, 200, 400]);
+    const interval = setInterval(() => navigator.vibrate([400, 200, 400]), 2200);
     return () => {
       clearInterval(interval);
-      context.close().catch(() => {});
-      ringtoneRef.current = null;
+      navigator.vibrate(0);
     };
   }, [incoming]);
 
+  // a ringing call while the app is in the background: a system notification, like WhatsApp
+  useEffect(() => {
+    if (!incoming || document.visibilityState === "visible") return;
+    if (!("serviceWorker" in navigator) || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const tag = `incoming-${incoming.callId}`;
+    navigator.serviceWorker.ready.then((registration) => registration.showNotification(
+      `Incoming ${incoming.isVideo ? "video" : "voice"} call`,
+      {
+        body: incoming.conversationName && incoming.conversationName !== incoming.callerName
+          ? `${incoming.callerName} @ ${incoming.conversationName}`
+          : incoming.callerName,
+        icon: "/icons/icon.svg",
+        tag,
+        requireInteraction: true,
+        vibrate: [400, 200, 400, 200, 400],
+        data: { url: "/" },
+      }
+    )).catch(() => {});
+    return () => {
+      navigator.serviceWorker.ready
+        .then((registration) => registration.getNotifications({ tag }))
+        .then((list) => list.forEach((item) => item.close()))
+        .catch(() => {});
+    };
+  }, [incoming]);
+
+  /* ---------- timer: calling / ringing / in call ---------- */
   useEffect(() => {
     const timerStartedAt = call?.connectedAt || call?.startedAt || incoming?.startedAt;
     if (!timerStartedAt) {
@@ -237,6 +405,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     return () => clearInterval(timer);
   }, [call?.connectedAt, call?.startedAt, incoming?.startedAt]);
 
+  /* ---------- socket events ---------- */
   useEffect(() => {
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
@@ -249,19 +418,19 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
     const onParticipant = async ({ callId, userId }) => {
       const active = callRef.current;
-      if (!active || active.callId !== callId || userId === currentUser?._id) return;
+      if (!active || active.callId !== callId || userId === currentUserIdRef.current) return;
       if (!active.connectedAt) {
         const connectedCall = { ...active, status: "connected", connectedAt: Date.now() };
         callRef.current = connectedCall;
         setCall(connectedCall);
       }
       const peer = makePeer(userId, callId);
-      if (currentUser._id < userId) {
+      if (currentUserIdRef.current < userId) {
         try {
           const offer = await peer.createOffer();
           await peer.setLocalDescription(offer);
           socket.emit("call:signal", { callId, to: userId, signal: { description: peer.localDescription.toJSON() } });
-        } catch (error) {
+        } catch {
           toast.error("Unable to connect a call participant.");
         }
       }
@@ -274,10 +443,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           if (peer.remoteDescription) {
             await peer.addIceCandidate(new RTCIceCandidate(signal.candidate));
           } else {
-            pendingCandidatesRef.current.set(from, [
-              ...(pendingCandidatesRef.current.get(from) || []),
-              signal.candidate,
-            ]);
+            pendingCandidatesRef.current.set(from, [...(pendingCandidatesRef.current.get(from) || []), signal.candidate]);
           }
           return;
         }
@@ -291,18 +457,30 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           await peer.setRemoteDescription(new RTCSessionDescription(signal.description));
           await flushCandidates(from, peer);
         }
-      } catch (error) {
+      } catch {
         toast.error("Unable to establish this call connection.");
       }
     };
+    const endInfo = (active) => ({
+      name: active.isGroup || active.isCaller ? active.conversationName : active.callerName,
+      photo: active.photo,
+    });
     const onEnded = ({ callId, reason }) => {
-      if (callRef.current?.callId === callId) {
+      const active = callRef.current;
+      if (active?.callId === callId) {
+        const connectedFor = active.connectedAt ? Math.floor((Date.now() - active.connectedAt) / 1000) : null;
+        if (reason === "no-answer") notifyMissed(active, active.recipients);
         stopCall(false);
-        if (reason === "no-answer") toast.info("No answer.");
-        else if (reason === "declined") toast.info("The call was declined.");
-        else toast.info("The call has ended.");
+        if (reason === "no-answer") showEnded("No answer", "", endInfo(active), true);
+        else if (reason === "declined") showEnded("Call declined", "", endInfo(active), true);
+        else showEnded("Call ended", connectedFor != null ? formatTime(connectedFor) : "", endInfo(active));
       }
-      setIncoming((current) => current?.callId === callId ? null : current);
+      setIncoming((current) => {
+        if (current?.callId === callId && reason !== "answered-elsewhere" && reason !== "declined-elsewhere") {
+          toast.info(`Missed call from ${current.callerName || "someone"}.`);
+        }
+        return current?.callId === callId ? null : current;
+      });
     };
     const onLeft = ({ callId, userId }) => {
       if (callRef.current?.callId === callId) removePeer(userId);
@@ -312,30 +490,38 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       if (callRef.current?.callId === callId && callRef.current.isGroup) toast.info("A participant declined the call.");
     };
     const onRinging = ({ callId }) => {
-      if (callRef.current?.callId !== callId) return;
+      if (callRef.current?.callId !== callId || callRef.current.connectedAt) return;
       const ringingCall = { ...callRef.current, status: "ringing" };
       callRef.current = ringingCall;
       setCall(ringingCall);
     };
     const onAccepted = ({ callId }) => {
-      if (callRef.current?.callId !== callId) return;
+      if (callRef.current?.callId !== callId || callRef.current.connectedAt) return;
       const connectedCall = { ...callRef.current, status: "connected", connectedAt: Date.now() };
       callRef.current = connectedCall;
       setCall(connectedCall);
     };
     const onBusy = ({ callId, userId }) => {
-      if (callRef.current?.callId !== callId) return;
-      if (userId === currentUser?._id) {
-        toast.error("You are already in another call.");
+      const active = callRef.current;
+      if (active?.callId !== callId) return;
+      if (userId === currentUserIdRef.current) {
         stopCall(false);
+        showEnded("You are on another call", "", endInfo(active), true);
         return;
       }
-      toast.info(`${userId === conversation?._id ? conversation?.name || "The other person" : "A participant"} is on another call.`);
+      if (active.isGroup) toast.info(`${personFor(userId)?.name || "A participant"} is on another call.`);
+      // one-to-one: call:unavailable with reason "busy" follows
     };
     const onUnavailable = ({ callId, reason }) => {
-      if (callRef.current?.callId !== callId) return;
-      toast.info(reason === "busy" ? "The line is busy." : "No one is available to take the call.");
+      const active = callRef.current;
+      if (active?.callId !== callId) return;
       stopCall(false);
+      if (reason === "busy") {
+        showEnded("Line busy", active.isGroup ? "Everyone is on another call" : "On another call", endInfo(active), true);
+      } else {
+        notifyMissed(active, active.recipients);
+        showEnded(active.isGroup ? "Nobody is available" : "Unavailable", "They are offline. We let them know you called.", endInfo(active), true);
+      }
     };
 
     socket.on("call:invite", onInvite);
@@ -363,83 +549,161 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       socket.off("call:accepted", onAccepted);
       socket.off("call:busy", onBusy);
       socket.off("call:unavailable", onUnavailable);
-      stopCall();
     };
-  }, [currentUser?._id, flushCandidates, loadIceServers, makePeer, removePeer, stopCall]);
+  }, [flushCandidates, makePeer, notifyMissed, personFor, removePeer, showEnded, stopCall]);
+
+  // leaving the page (sign out, closing the tab) hangs up
+  useEffect(() => () => {
+    clearTimeout(endTimerRef.current);
+    stopCall();
+  }, [stopCall]);
 
   useEffect(() => {
     if (call && localStreamRef.current) {
       const element = document.getElementById("local-call-stream");
       if (element) element.srcObject = localStreamRef.current;
     }
-  }, [call]);
+  }, [call, facingMode]);
+
+  const remoteEntries = Object.entries(remoteStreams);
+  const statusText = call
+    ? call.connectedAt
+      ? formatTime(elapsedSeconds)
+      : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" ? "Connecting" : "Calling"}… ${formatTime(elapsedSeconds)}`
+    : "";
+  const callName = call ? (call.isGroup || call.isCaller ? call.conversationName : call.callerName) : "";
+  const incomingPerson = incoming ? personFor(incoming.callerId) : null;
+  const showVideoStage = call?.isVideo && remoteEntries.length > 0;
 
   return (
     <>
-      {showButtons && <button
-        type="button"
-        className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-50"
-        title="Voice call"
-        aria-label="Start voice call"
-        disabled={busy || !socketConnected}
-        onClick={() => startCall(false)}
-      >
-        <MdAddIcCall size={20} />
-      </button>}
-      {showButtons && <button
-        type="button"
-        className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-50"
-        title="Video call"
-        aria-label="Start video call"
-        disabled={busy || !socketConnected}
-        onClick={() => startCall(true)}
-      >
-        <FaVideo size={18} />
-      </button>}
+      {showButtons && (
+        <button
+          type="button"
+          className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
+          title={socketConnected ? "Voice call" : "Connecting…"}
+          aria-label="Start voice call"
+          disabled={busy || Boolean(call)}
+          onClick={() => startCall(false)}
+        >
+          <MdAddIcCall size={20} />
+        </button>
+      )}
+      {showButtons && (
+        <button
+          type="button"
+          className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
+          title={socketConnected ? "Video call" : "Connecting…"}
+          aria-label="Start video call"
+          disabled={busy || Boolean(call)}
+          onClick={() => startCall(true)}
+        >
+          <FaVideo size={18} />
+        </button>
+      )}
 
+      {/* ---------- incoming call ---------- */}
       {incoming && (
-        <div className="call-overlay fixed inset-0 z-[70] grid place-items-center bg-slate-950/80 p-4">
-          <div className="call-dialog w-full max-w-sm rounded-2xl border border-[#263248] bg-[#111827] p-6 text-center shadow-2xl">
-            <p className="text-sm text-indigo-300">{incoming.isVideo ? "Incoming video call" : "Incoming voice call"}</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">{incoming.callerName}</h2>
-            {incoming.conversationName && <p className="mt-1 text-sm text-[#91a0b7]">{incoming.conversationName}</p>}
-            <p className="mt-2 text-xs text-[#91a0b7]">
-              Calling · {String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:{String(elapsedSeconds % 60).padStart(2, "0")}
-            </p>
-            <div className="mt-6 flex justify-center gap-3">
-              <button type="button" className="rounded-xl bg-emerald-600 px-5 py-2.5 font-medium text-white hover:bg-emerald-500 disabled:opacity-50" onClick={acceptCall} disabled={busy}>Accept</button>
-              <button type="button" className="rounded-xl bg-rose-600 px-5 py-2.5 font-medium text-white hover:bg-rose-500" onClick={() => { socket.emit("call:reject", { callId: incoming.callId, callerId: incoming.callerId }); setIncoming(null); }}>Decline</button>
+        <div className="call-screen call-overlay" role="dialog" aria-modal="true" aria-label="Incoming call">
+          <div className="call-hero">
+            <p className="call-kind">{incoming.isVideo ? "Incoming video call" : "Incoming voice call"}</p>
+            <div className="call-avatar is-ringing">
+              <img src={getImageURL(incomingPerson?.photo)} alt="" />
+            </div>
+            <h2 className="call-name">{incoming.callerName}</h2>
+            {incoming.conversationName && incoming.conversationName !== incoming.callerName && (
+              <p className="call-sub">{incoming.conversationName}</p>
+            )}
+            <p className="call-status">Ringing… {formatTime(elapsedSeconds)}</p>
+          </div>
+          <div className="call-actions is-incoming">
+            <div className="call-action">
+              <button type="button" className="call-round is-end" onClick={declineCall} aria-label="Decline">
+                <FiPhoneOff />
+              </button>
+              <span>Decline</span>
+            </div>
+            <div className="call-action">
+              <button type="button" className="call-round is-accept" onClick={acceptCall} disabled={busy} aria-label="Accept">
+                {incoming.isVideo ? <FiVideo /> : <FiPhone />}
+              </button>
+              <span>Accept</span>
             </div>
           </div>
         </div>
       )}
 
+      {/* ---------- active call ---------- */}
       {call && (
-        <div className="call-overlay fixed inset-0 z-[70] flex flex-col bg-[#090d17] p-4 sm:p-8">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="font-semibold text-white">{call.conversationName || conversation?.name || "Call"}</p>
-              <p className="text-sm text-[#91a0b7]">
-                {call.isVideo ? "Video call" : "Voice call"} · {Object.keys(remoteStreams).length + 1} participant(s)
-                {" · "}
-                {call.connectedAt
-                  ? `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`
-                  : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" ? "Connecting" : "Calling"} · ${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`}
-              </p>
+        <div className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""}`} role="dialog" aria-modal="true" aria-label="Call">
+          {showVideoStage && (
+            <div className={`call-stage ${remoteEntries.length > 1 ? "is-grid" : ""}`}>
+              {remoteEntries.map(([id, stream]) => (
+                <CallVideo key={id} stream={stream} label={personFor(id)?.name || (id === conversation?._id ? conversation.name : "Participant")} />
+              ))}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" aria-pressed={muted} className="rounded-xl bg-[#263248] px-4 py-3 font-medium text-white hover:bg-[#33415c]" onClick={() => toggleTrack("audio")}>{muted ? "Unmute" : "Mute"}</button>
-              {call.isVideo && <button type="button" aria-pressed={cameraOff} className="rounded-xl bg-[#263248] px-4 py-3 font-medium text-white hover:bg-[#33415c]" onClick={() => toggleTrack("video")}>{cameraOff ? "Camera on" : "Camera off"}</button>}
-              <button type="button" className="rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white hover:bg-rose-500" onClick={() => stopCall()}>End call</button>
+          )}
+          {!call.isVideo && remoteEntries.map(([id, stream]) => <RemoteAudio key={id} stream={stream} />)}
+
+          <div className={`call-hero ${showVideoStage ? "is-compact" : ""}`}>
+            <p className="call-kind">{call.isVideo ? "Video call" : "Voice call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
+            {!showVideoStage && (
+              <div className={`call-avatar ${call.connectedAt ? "" : "is-ringing"}`}>
+                <img src={getImageURL(call.photo)} alt="" />
+              </div>
+            )}
+            <h2 className="call-name">{callName || "Call"}</h2>
+            <p className="call-status">{statusText}</p>
+            {call.connectedAt && remoteEntries.length === 0 && <p className="call-sub">Connecting audio…</p>}
+          </div>
+
+          {call.isVideo && (
+            <video id="local-call-stream" className={`call-self-view ${facingMode === "user" ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""}`} autoPlay playsInline muted />
+          )}
+
+          <div className="call-actions">
+            <div className="call-action">
+              <button type="button" className={`call-round ${muted ? "is-on" : ""}`} aria-pressed={muted} onClick={() => toggleTrack("audio")} aria-label={muted ? "Unmute" : "Mute"}>
+                {muted ? <FiMicOff /> : <FiMic />}
+              </button>
+              <span>{muted ? "Unmute" : "Mute"}</span>
+            </div>
+            {call.isVideo && (
+              <div className="call-action">
+                <button type="button" className={`call-round ${cameraOff ? "is-on" : ""}`} aria-pressed={cameraOff} onClick={() => toggleTrack("video")} aria-label={cameraOff ? "Turn camera on" : "Turn camera off"}>
+                  {cameraOff ? <FiVideoOff /> : <FiVideo />}
+                </button>
+                <span>Camera</span>
+              </div>
+            )}
+            {call.isVideo && (
+              <div className="call-action">
+                <button type="button" className="call-round" onClick={flipCamera} aria-label="Switch camera">
+                  <FiRefreshCw />
+                </button>
+                <span>Flip</span>
+              </div>
+            )}
+            <div className="call-action">
+              <button type="button" className="call-round is-end" onClick={hangUp} aria-label="End call">
+                <FiPhoneOff />
+              </button>
+              <span>End</span>
             </div>
           </div>
-          {Object.keys(remoteStreams).length === 0 && <p className="mb-3 text-sm text-[#91a0b7]">{call.status === "connected" ? "Connecting audio…" : call.status === "ringing" ? "Ringing…" : "Calling…"}</p>}
-          <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {call.isVideo && <CallVideo streamId="local-call-stream" stream={localStreamRef.current} muted label="You" />}
-            {Object.entries(remoteStreams).map(([id, stream]) => (
-              <CallVideo key={id} stream={stream} label={id === conversation?._id ? conversation.name : "Participant"} audioOnly={!call.isVideo} />
-            ))}
-            {!call.isVideo && <audio id="local-call-audio" autoPlay muted />}
+        </div>
+      )}
+
+      {/* ---------- after a call: "Line busy", "No answer", "Call ended 01:23" … ---------- */}
+      {ended && !call && !incoming && (
+        <div className="call-screen call-overlay is-ended" role="status" onClick={() => setEnded(null)}>
+          <div className="call-hero">
+            <div className="call-avatar">
+              <img src={getImageURL(ended.photo)} alt="" />
+            </div>
+            <h2 className="call-name">{ended.name || "Call"}</h2>
+            <p className="call-status is-ended">{ended.title}</p>
+            {ended.subtitle && <p className="call-sub">{ended.subtitle}</p>}
           </div>
         </div>
       )}
@@ -447,22 +711,23 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   );
 }
 
-function CallVideo({ streamId, stream, muted = false, label, audioOnly = false }) {
+function CallVideo({ stream, label }) {
   const videoRef = useRef(null);
-  const audioRef = useRef(null);
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream || null;
-    if (audioRef.current) audioRef.current.srcObject = stream || null;
   }, [stream]);
-
   return (
-    <div className="relative grid min-h-36 place-items-center overflow-hidden rounded-2xl border border-[#263248] bg-[#111827]">
-      {audioOnly ? (
-        <audio ref={audioRef} autoPlay />
-      ) : (
-        <video id={streamId} ref={videoRef} autoPlay playsInline muted={muted} className="h-full w-full object-cover" />
-      )}
-      <span className="absolute bottom-3 left-3 rounded-lg bg-black/50 px-2 py-1 text-xs text-white">{label}</span>
+    <div className="call-tile">
+      <video ref={videoRef} autoPlay playsInline />
+      <span>{label}</span>
     </div>
   );
+}
+
+function RemoteAudio({ stream }) {
+  const audioRef = useRef(null);
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.srcObject = stream || null;
+  }, [stream]);
+  return <audio ref={audioRef} autoPlay />;
 }

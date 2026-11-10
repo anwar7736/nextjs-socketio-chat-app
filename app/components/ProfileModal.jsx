@@ -99,7 +99,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
     <div className="print-container fixed inset-0 bg-gray-800 bg-opacity-50 flex items-center justify-center z-50">
       <div className="relative bg-white rounded-lg shadow-lg w-[500px] max-h-[90vh] p-6 overflow-y-auto">
         <button
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 no-print"
+          type="button" aria-label="Close" className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 no-print"
           onClick={onClose}
           title="Close"
         >
@@ -197,6 +197,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
               Update Now
             </button>
             <button
+              type="button"
               onClick={onClose}
               className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-300"
               title="Close"
