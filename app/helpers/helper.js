@@ -76,8 +76,11 @@ export const dateTimeFormat = (date) => {
   } else return "";
 };
 
+let socketInstance;
+
 export const socket_connection = () => {
-  return io(
+  if (socketInstance) return socketInstance;
+  socketInstance = io(
     process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3002",
     {
       transports: ["websocket", "polling"],
@@ -98,6 +101,7 @@ export const socket_connection = () => {
       },
     }
   );
+  return socketInstance;
 };
 
 // photos uploaded by the app are stored in the database (random uuid names, see app/lib/profileImage.js)

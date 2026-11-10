@@ -24,6 +24,7 @@ Authenticator-based 2FA can be enabled or disabled under Profile settings. Disab
 
 - Responsive dark chat and sign-in screens.
 - Installable PWA shell; API responses and private attachments are not cached offline.
+- Opt-in Web Push message notifications, including ticket links that survive a sign-in redirect. Configure the VAPID keys in `.env.local` and the production host before enabling notifications; browser permission and HTTPS are required.
 - Private and group messages with image, PDF, audio, video, and recorded voice-note attachments.
 - WebRTC audio/video calling with Socket.IO signaling. Calls use browser peer-to-peer connections, support up to eight participants, and use short-lived TURN REST credentials when `TURN_URLS` and `TURN_SHARED_SECRET` are configured. Without TURN, some restrictive networks will not connect.
 
@@ -31,6 +32,7 @@ Authenticator-based 2FA can be enabled or disabled under Profile settings. Disab
 
 - **Vercel frontend + VPS Socket.IO:** set `NEXT_PUBLIC_SOCKET_URL` in Vercel to the public HTTPS Socket.IO hostname (for example, `https://socket.example.com`). Set `AUTH_SECRET` in Vercel and the VPS `.env` to the exact same random value of at least 32 characters. On the VPS, set `CORS_ORIGINS` to the exact browser origins of the app, comma-separated (for example, `https://chat.example.com,https://preview.chat.example.com`). The browser requests a signed, 60-second socket ticket from the authenticated Next.js API for every connection/reconnection, so the VPS does not need access to the app's session cookie or database. Do not use wildcard origins; give Vercel preview deployments a stable custom domain and add that exact origin. Serve the VPS through HTTPS and a WebSocket-capable reverse proxy.
 - Attachments, voice notes and profile photos are stored in MongoDB (GridFS bucket `files`), so every instance (including Vercel functions) serves the same files. Uploads are limited to 4 MB on Vercel (its request size limit); set `MAX_UPLOAD_MB` on other hosts. Files from the old `uploads/` folder are still served when present.
+- For Web Push, run `npx web-push generate-vapid-keys` and set `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` in the frontend environment. Keep the private key secret; use HTTPS in production.
 - The Socket.IO server currently keeps presence and call state in process memory. Multi-instance deployments need the Socket.IO Redis adapter and shared presence/call coordination.
 - Group calling is peer-to-peer mesh, capped at eight participants. Use an SFU for larger or high-traffic group calls.
 - Configure a real TURN service for reliable calls across NATs/firewalls. TURN credentials are generated per signed-in user and expire after one hour.

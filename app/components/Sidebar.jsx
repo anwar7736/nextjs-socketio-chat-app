@@ -3,7 +3,9 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { CgProfile } from "react-icons/cg";
 import { IoIosAddCircleOutline, IoMdArrowDropdown } from "react-icons/io";
 import { IoPowerOutline } from "react-icons/io5";
+import { IoNotificationsOutline } from "react-icons/io5";
 import { MdAdd } from "react-icons/md";
+import { toast } from "react-toastify";
 import { AuthContext } from "../contexts/AuthContext";
 import { clearAuthProfile, getImageURL, socket_connection } from "../helpers/helper";
 import GroupCreateModal from "./GroupCreateModal";
@@ -24,12 +26,56 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
   };
 
   const logout = async () => {
-    const socket = socket_connection();
-    socket.emit("user-logout", user?._id);
-    await fetch("/api/auth/logout", { method: "POST" });
-    clearAuthProfile();
-    setUser("");
-    router.push("/auth");
+    try {
+      const activeSocket = socket_connection();
+      if (activeSocket?.connected) {
+        activeSocket.emit("user-logout");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("Unable to sign out. Please try again.");
+      clearAuthProfile();
+      setUser("");
+      router.push("/auth");
+    } catch (error) {
+      toast.error(error.message || "Unable to sign out.");
+    }
+  };
+
+  const enableNotifications = async () => {
+    setIsDropdownOpen(false);
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      toast.error("This browser does not support push notifications.");
+      return;
+    }
+    try {
+      const keyResponse = await fetch("/api/push-subscription", { cache: "no-store" });
+      const keyResult = await keyResponse.json();
+      if (!keyResponse.ok || !keyResult.success) {
+        throw new Error(keyResult.message || "Push notifications are not configured.");
+      }
+      const permission = Notification.permission === "default"
+        ? await Notification.requestPermission()
+        : Notification.permission;
+      if (permission !== "granted") throw new Error("Allow notifications in your browser settings to continue.");
+
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription() ||
+        await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: decodeVapidKey(keyResult.publicKey),
+        });
+      const response = await fetch("/api/push-subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(subscription),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Unable to enable notifications.");
+      toast.success("Message notifications are enabled.");
+    } catch (error) {
+      toast.error(error.message || "Unable to enable notifications.");
+    }
   };
 
   const handleAddGroupModal = () => {
@@ -92,6 +138,15 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
             >
               <li>
                 <button
+                  onClick={enableNotifications}
+                  className="flex w-full items-center px-4 py-3 text-left hover:bg-[#263248]"
+                >
+                  <IoNotificationsOutline className="mr-2 text-indigo-300" />
+                  Enable notifications
+                </button>
+              </li>
+              <li>
+                <button
                   onClick={handleAddGroupModal}
                   className="flex w-full items-center px-4 py-3 text-left hover:bg-[#263248]"
                 >
@@ -149,5 +204,12 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
     </aside>
   );
 };
+
+function decodeVapidKey(base64Key) {
+  const padding = "=".repeat((4 - base64Key.length % 4) % 4);
+  const base64 = (base64Key + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
 
 export default Sidebar;

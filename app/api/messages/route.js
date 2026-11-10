@@ -4,6 +4,7 @@ import { messageSchema } from "@/app/models/messageModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { userSchema } from "@/app/models/userModel";
+import { sendPushNotification } from "@/app/lib/pushNotifications";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 
@@ -68,6 +69,7 @@ export async function GET(request) {
     {
       $project: {
         _id: 1,
+        message_id: 1,
         status: 1,
         "group._id": 1,
         "group.name": 1,
@@ -79,6 +81,8 @@ export async function GET(request) {
         "message.attachmentUrl": 1,
         "message.attachmentName": 1,
         "message.mimeType": 1,
+        "message.reply_to": 1,
+        "message.reactions": 1,
         "message.createdAt": 1,
         "sender._id": 1,
         "sender.name": 1,
@@ -104,6 +108,9 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: "Invalid request body." }, { status: 400 });
   }
   const { receiver_id, is_group, attachmentUrl, attachmentName, mimeType, type } = body;
+  const replyTo = typeof body.reply_to === "string" && objectIdPattern.test(body.reply_to)
+    ? new mongoose.Types.ObjectId(body.reply_to)
+    : null;
   const text = typeof body.message === "string" ? body.message.trim() : "";
   const isGroup = is_group === 1 || is_group === true;
   if (!receiver_id || !objectIdPattern.test(receiver_id) || (!text && !attachmentUrl) || text.length > 5000) {
@@ -126,8 +133,23 @@ export async function POST(request) {
   if (isGroup) {
     const member = await groupMemberSchema.exists({ group_id: receiverId, user_id: senderId, status: 1 });
     if (!member) return NextResponse.json({ success: false, message: "You are not a member of this group." }, { status: 403 });
+    if (replyTo && !(await messageLogSchema.exists({ message_id: replyTo, group_id: receiverId, receiver_id: senderId }))) {
+      return NextResponse.json({ success: false, message: "The message you are replying to is unavailable." }, { status: 400 });
+    }
   } else if (senderId.equals(receiverId) || !(await userSchema.exists({ _id: receiverId, status: 1 }))) {
     return NextResponse.json({ success: false, message: "Recipient not found." }, { status: 404 });
+  } else if (
+    replyTo &&
+    !(await messageLogSchema.exists({
+      message_id: replyTo,
+      $or: [
+        { sender_id: senderId, receiver_id: receiverId },
+        { sender_id: receiverId, receiver_id: senderId },
+      ],
+      group_id: { $exists: false },
+    }))
+  ) {
+    return NextResponse.json({ success: false, message: "The message you are replying to is unavailable." }, { status: 400 });
   }
 
   const message = await messageSchema.create({
@@ -138,6 +160,7 @@ export async function POST(request) {
     attachmentUrl,
     attachmentName: typeof attachmentName === "string" ? attachmentName.slice(0, 180) : undefined,
     mimeType: typeof mimeType === "string" ? mimeType.slice(0, 100) : undefined,
+    ...(replyTo ? { reply_to: replyTo } : {}),
   });
 
   let logs;
@@ -161,6 +184,15 @@ export async function POST(request) {
       receiver_id: receiverId,
     });
   }
+
+  const pushRecipients = (isGroup ? recipientIds : [receiver_id]).filter((id) => id !== sessionUserId);
+  const notificationBody = text || (type === "image" ? "📷 Photo" : type === "audio" ? "🎤 Voice message" : type === "video" ? "🎥 Video" : "📎 Attachment");
+  await sendPushNotification(pushRecipients, {
+    title: "New message",
+    body: notificationBody.slice(0, 180),
+    url: `/?ticket=${encodeURIComponent(receiver_id)}&is_group=${isGroup ? "1" : "0"}`,
+    tag: `message-${receiver_id}`,
+  }).catch((error) => console.error("Unable to prepare a Web Push notification:", error));
 
   return NextResponse.json({
     success: true,

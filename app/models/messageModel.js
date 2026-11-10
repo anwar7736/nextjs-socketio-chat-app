@@ -8,6 +8,12 @@ const messageModel = new mongoose.Schema({
     "attachmentUrl": String,
     "attachmentName": String,
     "mimeType": String,
+    "reply_to": mongoose.Schema.Types.ObjectId,
+    "reactions": [{
+        _id: false,
+        user_id: mongoose.Schema.Types.ObjectId,
+        emoji: String,
+    }],
     "status": {type: Number, default: 1 }, // 0=>inactive, 1=>active
 }, {
     timestamps: true

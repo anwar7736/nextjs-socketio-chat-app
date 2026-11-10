@@ -1,8 +1,8 @@
 "use client";
 import Picker from "emoji-picker-react";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FaPaperclip } from "react-icons/fa";
-import { FiMic, FiSquare } from "react-icons/fi";
+import { FiCamera, FiMic, FiSquare } from "react-icons/fi";
 import { toast } from "react-toastify";
 import GroupEditOrViewModal from "./components/GroupEditOrViewModal";
 import Messages from "./components/Messages";
@@ -31,6 +31,7 @@ const Home = () => {
   const [data, setData] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [attachment, setAttachment] = useState(null);
+  const [replyTarget, setReplyTarget] = useState(null);
   const [messageError, setMessageError] = useState("");
   const [attachmentError, setAttachmentError] = useState("");
   const [recording, setRecording] = useState(false);
@@ -38,13 +39,15 @@ const Home = () => {
   const recorderRef = useRef(null);
   const recordingTimerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const messageInputRef = useRef(null);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
     setMessage((msg) => msg + emojiObject.emoji);
     setShowPicker(false);
   };
 
-  const getUserList = async () => {
+  const getUserList = useCallback(async () => {
     let res = await fetch(
       `/api/users?auth_id=${authUser._id}&search=${search}`
     );
@@ -52,11 +55,43 @@ const Home = () => {
     if (res.success) {
       setUsers(res.data);
     }
-  };
+  }, [authUser?._id, search, setUsers]);
 
   useEffect(() => {
     getUserList();
-  }, [search]);
+  }, [getUserList]);
+
+  useEffect(() => {
+    if (!authUser?._id) return;
+    const params = new URLSearchParams(window.location.search);
+    const ticketId = params.get("ticket");
+    const isGroup = params.get("is_group") === "1";
+    if (!ticketId || !/^[a-f\d]{24}$/i.test(ticketId)) return;
+    let cancelled = false;
+    const openTicket = async () => {
+      const response = await fetch(`/api/users?auth_id=${authUser._id}`);
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        toast.error(result.message || "Unable to open the notification conversation.");
+        return;
+      }
+      const ticket = result.data.find((item) => item._id === ticketId && Number(item.is_group) === Number(isGroup));
+      if (!ticket) {
+        toast.error("This conversation is unavailable.");
+        return;
+      }
+      const conversationMessages = await loadMessages(ticket);
+      if (cancelled) return;
+      setUser(ticket);
+      setMessages(conversationMessages || []);
+      window.history.replaceState(null, "", "/");
+    };
+    openTicket().catch((error) => {
+      console.error("Unable to open the notification conversation:", error);
+      toast.error("Unable to open the notification conversation.");
+    });
+    return () => { cancelled = true; };
+  }, [authUser?._id, setMessages, setUser]);
 
   useEffect(() => {
     if (!authUser?._id) return;
@@ -103,6 +138,7 @@ const Home = () => {
         attachmentUrl: uploaded?.url,
         attachmentName: uploaded?.name,
         mimeType: uploaded?.mimeType,
+        reply_to: replyTarget?.message_id,
         type: uploaded?.mimeType?.startsWith("image/")
           ? "image"
           : uploaded?.mimeType?.startsWith("audio/")
@@ -119,6 +155,7 @@ const Home = () => {
       if (response.ok && res.success) {
         socket.emit("private-message", JSON.stringify(res.data));
         setMessage("");
+        setReplyTarget(null);
         setAttachment(null);
         // the socket server does not echo an event back to the tab that sent it
         setMessages(await loadMessages(user));
@@ -250,9 +287,18 @@ const Home = () => {
 
     socket.off("message-deleted");
     socket.on("message-deleted", (data) => {
-      let filterMessages = [...messages];
-      filterMessages = filterMessages.filter((m) => m?._id !== data?._id);
-      setMessages(filterMessages);
+      setMessages((current) => (current || []).filter((item) =>
+        item?._id !== data?._id && (!data?.message_id || item?.message_id !== data.message_id)
+      ));
+    });
+
+    socket.off("message-reaction");
+    socket.on("message-reaction", (data) => {
+      setMessages((current) => (current || []).map((item) =>
+        item?.message_id === data?.message_id
+          ? { ...item, message: { ...item.message, reactions: data.reactions } }
+          : item
+      ));
     });
 
     socket.off("add-group");
@@ -341,6 +387,45 @@ const Home = () => {
     loadActiveUsers();
   }, [user, authUser]);
 
+  useEffect(() => {
+    const handleReply = (event) => {
+      setReplyTarget(event.detail);
+      messageInputRef.current?.focus();
+    };
+    window.addEventListener("chat:reply", handleReply);
+    return () => window.removeEventListener("chat:reply", handleReply);
+  }, []);
+
+  useEffect(() => {
+    setReplyTarget(null);
+  }, [user?._id]);
+
+  const chooseAttachment = async (file, optimizeImage = false) => {
+    if (!file) return;
+    setAttachmentError("");
+    const supportedImageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i.test(file.name);
+    if (isImage && (optimizeImage || !supportedImageTypes.includes(file.type.toLowerCase()))) {
+      try {
+        const bitmap = await createImageBitmap(file);
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext("2d").drawImage(bitmap, 0, 0);
+        bitmap.close();
+        const blob = await new Promise((resolve, reject) => {
+          canvas.toBlob((result) => result ? resolve(result) : reject(new Error("Image conversion failed.")), "image/jpeg", 0.9);
+        });
+        setAttachment(new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.jpg`, { type: "image/jpeg" }));
+      } catch (error) {
+        setAttachmentError("This camera image format is not supported by this browser. Choose JPEG or PNG.");
+      }
+      return;
+    }
+    setAttachment(file);
+  };
+
   const handleEditOrViewModal = async () => {
     if (user.is_group === 1) {
       let res = await fetch(`/api/group?id=${user?._id}`);
@@ -394,6 +479,7 @@ const Home = () => {
                 </button>
                 <img
                   src={getImageURL(user?.photo)}
+                  alt=""
                   height={40}
                   width={40}
                   className="h-10 w-10 rounded-full border border-indigo-400 object-cover"
@@ -467,8 +553,18 @@ const Home = () => {
                       accept="image/*,audio/*,video/mp4,video/webm,application/pdf"
                       className="hidden"
                       onChange={(event) => {
-                        setAttachment(event.target.files?.[0] || null);
-                        setAttachmentError("");
+                        chooseAttachment(event.target.files?.[0]);
+                        event.target.value = "";
+                      }}
+                    />
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(event) => {
+                        chooseAttachment(event.target.files?.[0], true);
                         event.target.value = "";
                       }}
                     />
@@ -490,56 +586,76 @@ const Home = () => {
                     >
                       {recording ? <FiSquare /> : <FiMic />}
                     </button>
-                    <div className="relative w-full">
-                      <div className="relative w-full">
-                        {/* Input and Send Button Wrapper */}
-                        <div className="flex items-center">
-                          <div className="relative flex-grow">
-                            <input
-                              type="text"
-                              placeholder="Type a message..."
-                              className="form-control pr-12"
-                              aria-invalid={Boolean(messageError)}
-                              onChange={(e) => { setMessage(e.target.value); setMessageError(""); }}
-                              value={message}
-                            />
-                            {/* Emoji Picker Icon */}
-                            <button
-                              type="button"
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-lg"
-                              title="Choose emoji"
-                              aria-label="Choose emoji"
-                              onClick={() => setShowPicker((val) => !val)}
-                            >
-                              🙂
-                            </button>
-                          </div>
-                          {/* Send Button */}
-                          <button
-                            type="submit"
-                            className={`ml-3 rounded-xl px-4 py-3 font-medium ${
-                              message.trim()?.length > 0
-                                ? "bg-indigo-500 hover:bg-indigo-400"
-                                : "cursor-not-allowed bg-indigo-500/40"
-                            } text-white`}
-                            disabled={sending}
-                            title={message.trim().length > 0 || attachment ? "Send" : ""}
-                          >
-                            {sending ? "Sending..." : "Send"}
-                          </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="rounded-xl p-3 text-lg text-[#91a0b7] hover:bg-[#263248] hover:text-white"
+                        title="Choose emoji"
+                        aria-label="Choose emoji"
+                        onClick={() => setShowPicker((val) => !val)}
+                      >
+                        🙂
+                      </button>
+                      {showPicker && (
+                        <div className="emoji-picker-popover">
+                          <Picker
+                            pickerStyle={{ width: "min(360px, calc(100vw - 28px))" }}
+                            onEmojiClick={onEmojiClick}
+                          />
                         </div>
-                        <ValidationError message={messageError} />
-
-                        {/* Emoji Picker */}
-                        {showPicker && (
-                          <div className="left-0 w-full mt-2 z-10">
-                            <Picker
-                              pickerStyle={{ width: "100%" }}
-                              onEmojiClick={onEmojiClick}
-                            />
-                          </div>
-                        )}
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-xl p-3 text-[#91a0b7] hover:bg-[#263248] hover:text-white"
+                      title="Choose a photo from camera"
+                      aria-label="Take a photo"
+                      onClick={() => cameraInputRef.current?.click()}
+                    >
+                      <FiCamera />
+                    </button>
+                    <div className="relative w-full">
+                      {replyTarget && (
+                        <div className="mb-2 flex items-center justify-between rounded-xl border border-indigo-400/20 bg-[#182235] px-3 py-2 text-xs">
+                          <span className="truncate text-[#c7d2e3]">Replying to {replyTarget.sender}: {replyTarget.text}</span>
+                          <button type="button" className="ml-3 text-[#91a0b7]" onClick={() => setReplyTarget(null)} aria-label="Cancel reply">×</button>
+                        </div>
+                      )}
+                      <div className="flex items-end gap-2">
+                        <textarea
+                          ref={messageInputRef}
+                          rows={1}
+                          placeholder="Type a message..."
+                          className="form-control message-input min-h-11 resize-none"
+                          aria-invalid={Boolean(messageError)}
+                          onChange={(event) => {
+                            setMessage(event.target.value);
+                            setMessageError("");
+                            event.target.style.height = "auto";
+                            event.target.style.height = `${Math.min(event.target.scrollHeight, 140)}px`;
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && !event.shiftKey && window.innerWidth > 760) {
+                              event.preventDefault();
+                              sendMessage(event);
+                            }
+                          }}
+                          value={message}
+                        />
+                        <button
+                          type="submit"
+                          className={`shrink-0 rounded-xl px-4 py-3 font-medium ${
+                            message.trim().length > 0 || attachment
+                              ? "bg-indigo-500 hover:bg-indigo-400"
+                              : "cursor-not-allowed bg-indigo-500/40"
+                          } text-white`}
+                          disabled={sending || (!message.trim() && !attachment)}
+                          title="Send"
+                        >
+                          {sending ? "..." : "Send"}
+                        </button>
                       </div>
+                      <ValidationError message={messageError} />
                     </div>
                   </div>
                 </footer>

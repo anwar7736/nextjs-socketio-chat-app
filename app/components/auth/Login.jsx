@@ -67,7 +67,8 @@ export default function Login() {
       setUser(result.data);
       setSelectedUser("");
       setMessages([]);
-      router.push("/");
+      const redirectTo = new URLSearchParams(window.location.search).get("redirectTo");
+      router.push(redirectTo?.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/");
     } catch (error) {
       showError("password", "Unable to reach the server. Please try again.");
     } finally {

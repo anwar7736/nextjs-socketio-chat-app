@@ -18,11 +18,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const peersRef = useRef(new Map());
   const pendingCandidatesRef = useRef(new Map());
   const callRef = useRef(null);
+  const ringtoneRef = useRef(null);
   const iceServersRef = useRef([{ urls: "stun:stun.l.google.com:19302" }]);
   const currentUserIdRef = useRef(currentUser?._id);
   currentUserIdRef.current = currentUser?._id;
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const loadIceServers = useCallback(async () => {
     const response = await fetch("/api/calls/ice-servers");
@@ -150,6 +152,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         callerName: currentUser.name,
         conversationName: conversation.name,
         isGroup: conversation.is_group === 1,
+        status: "calling",
+        startedAt: Date.now(),
       };
       callRef.current = activeCall;
       setCall(activeCall);
@@ -175,7 +179,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       const stream = await openMedia(incoming.isVideo);
       await loadIceServers();
       localStreamRef.current = stream;
-      const activeCall = { ...incoming, isCaller: false };
+      const activeCall = { ...incoming, isCaller: false, status: "connecting" };
       callRef.current = activeCall;
       setCall(activeCall);
       setIncoming(null);
@@ -188,6 +192,52 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   };
 
   useEffect(() => {
+    if (!incoming) {
+      clearInterval(ringtoneRef.current?.interval);
+      ringtoneRef.current?.context.close().catch(() => {});
+      ringtoneRef.current = null;
+      return;
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const beep = () => {
+      if (context.state !== "running") return;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = 480;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.45);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.46);
+    };
+    context.resume().then(beep).catch(() => {});
+    const interval = setInterval(beep, 1400);
+    ringtoneRef.current = { context, interval };
+    return () => {
+      clearInterval(interval);
+      context.close().catch(() => {});
+      ringtoneRef.current = null;
+    };
+  }, [incoming]);
+
+  useEffect(() => {
+    const timerStartedAt = call?.connectedAt || call?.startedAt || incoming?.startedAt;
+    if (!timerStartedAt) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - timerStartedAt) / 1000));
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [call?.connectedAt, call?.startedAt, incoming?.startedAt]);
+
+  useEffect(() => {
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
     const onInvite = (invite) => {
@@ -195,11 +245,16 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
         return;
       }
-      setIncoming(invite);
+      setIncoming({ ...invite, startedAt: Date.now() });
     };
     const onParticipant = async ({ callId, userId }) => {
       const active = callRef.current;
       if (!active || active.callId !== callId || userId === currentUser?._id) return;
+      if (!active.connectedAt) {
+        const connectedCall = { ...active, status: "connected", connectedAt: Date.now() };
+        callRef.current = connectedCall;
+        setCall(connectedCall);
+      }
       const peer = makePeer(userId, callId);
       if (currentUser._id < userId) {
         try {
@@ -256,9 +311,30 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       // in a one-to-one call the call:end that follows says it was declined
       if (callRef.current?.callId === callId && callRef.current.isGroup) toast.info("A participant declined the call.");
     };
-    const onUnavailable = ({ callId }) => {
+    const onRinging = ({ callId }) => {
       if (callRef.current?.callId !== callId) return;
-      toast.info("No one is available to take the call.");
+      const ringingCall = { ...callRef.current, status: "ringing" };
+      callRef.current = ringingCall;
+      setCall(ringingCall);
+    };
+    const onAccepted = ({ callId }) => {
+      if (callRef.current?.callId !== callId) return;
+      const connectedCall = { ...callRef.current, status: "connected", connectedAt: Date.now() };
+      callRef.current = connectedCall;
+      setCall(connectedCall);
+    };
+    const onBusy = ({ callId, userId }) => {
+      if (callRef.current?.callId !== callId) return;
+      if (userId === currentUser?._id) {
+        toast.error("You are already in another call.");
+        stopCall(false);
+        return;
+      }
+      toast.info(`${userId === conversation?._id ? conversation?.name || "The other person" : "A participant"} is on another call.`);
+    };
+    const onUnavailable = ({ callId, reason }) => {
+      if (callRef.current?.callId !== callId) return;
+      toast.info(reason === "busy" ? "The line is busy." : "No one is available to take the call.");
       stopCall(false);
     };
 
@@ -270,6 +346,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     socket.on("call:end", onEnded);
     socket.on("call:left", onLeft);
     socket.on("call:rejected", onRejected);
+    socket.on("call:ringing", onRinging);
+    socket.on("call:accepted", onAccepted);
+    socket.on("call:busy", onBusy);
     socket.on("call:unavailable", onUnavailable);
     return () => {
       socket.off("call:invite", onInvite);
@@ -280,6 +359,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       socket.off("call:end", onEnded);
       socket.off("call:left", onLeft);
       socket.off("call:rejected", onRejected);
+      socket.off("call:ringing", onRinging);
+      socket.off("call:accepted", onAccepted);
+      socket.off("call:busy", onBusy);
       socket.off("call:unavailable", onUnavailable);
       stopCall();
     };
@@ -316,11 +398,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       </button>}
 
       {incoming && (
-        <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/80 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-[#263248] bg-[#111827] p-6 text-center shadow-2xl">
+        <div className="call-overlay fixed inset-0 z-[70] grid place-items-center bg-slate-950/80 p-4">
+          <div className="call-dialog w-full max-w-sm rounded-2xl border border-[#263248] bg-[#111827] p-6 text-center shadow-2xl">
             <p className="text-sm text-indigo-300">{incoming.isVideo ? "Incoming video call" : "Incoming voice call"}</p>
             <h2 className="mt-2 text-xl font-semibold text-white">{incoming.callerName}</h2>
             {incoming.conversationName && <p className="mt-1 text-sm text-[#91a0b7]">{incoming.conversationName}</p>}
+            <p className="mt-2 text-xs text-[#91a0b7]">
+              Calling · {String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:{String(elapsedSeconds % 60).padStart(2, "0")}
+            </p>
             <div className="mt-6 flex justify-center gap-3">
               <button type="button" className="rounded-xl bg-emerald-600 px-5 py-2.5 font-medium text-white hover:bg-emerald-500 disabled:opacity-50" onClick={acceptCall} disabled={busy}>Accept</button>
               <button type="button" className="rounded-xl bg-rose-600 px-5 py-2.5 font-medium text-white hover:bg-rose-500" onClick={() => { socket.emit("call:reject", { callId: incoming.callId, callerId: incoming.callerId }); setIncoming(null); }}>Decline</button>
@@ -330,11 +415,17 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       )}
 
       {call && (
-        <div className="fixed inset-0 z-[70] flex flex-col bg-[#090d17] p-4 sm:p-8">
+        <div className="call-overlay fixed inset-0 z-[70] flex flex-col bg-[#090d17] p-4 sm:p-8">
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="font-semibold text-white">{call.conversationName || conversation?.name || "Call"}</p>
-              <p className="text-sm text-[#91a0b7]">{call.isVideo ? "Video call" : "Voice call"} · {Object.keys(remoteStreams).length + 1} participant(s)</p>
+              <p className="text-sm text-[#91a0b7]">
+                {call.isVideo ? "Video call" : "Voice call"} · {Object.keys(remoteStreams).length + 1} participant(s)
+                {" · "}
+                {call.connectedAt
+                  ? `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`
+                  : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" ? "Connecting" : "Calling"} · ${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`}
+              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" aria-pressed={muted} className="rounded-xl bg-[#263248] px-4 py-3 font-medium text-white hover:bg-[#33415c]" onClick={() => toggleTrack("audio")}>{muted ? "Unmute" : "Mute"}</button>
@@ -342,7 +433,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               <button type="button" className="rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white hover:bg-rose-500" onClick={() => stopCall()}>End call</button>
             </div>
           </div>
-          {Object.keys(remoteStreams).length === 0 && <p className="mb-3 text-sm text-[#91a0b7]">{call.isCaller === false ? "Connecting…" : "Ringing…"}</p>}
+          {Object.keys(remoteStreams).length === 0 && <p className="mb-3 text-sm text-[#91a0b7]">{call.status === "connected" ? "Connecting audio…" : call.status === "ringing" ? "Ringing…" : "Calling…"}</p>}
           <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {call.isVideo && <CallVideo streamId="local-call-stream" stream={localStreamRef.current} muted label="You" />}
             {Object.entries(remoteStreams).map(([id, stream]) => (

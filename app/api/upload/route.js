@@ -38,7 +38,8 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: "Choose a file to upload." }, { status: 400 });
   }
 
-  const mimeType = file.type.split(";")[0].trim().toLowerCase();
+  const rawMimeType = file.type.split(";")[0].trim().toLowerCase();
+  const mimeType = rawMimeType === "image/jpg" ? "image/jpeg" : rawMimeType;
   const extension = allowedTypes.get(mimeType);
   if (!extension) {
     return NextResponse.json({ success: false, message: "This file type is not supported." }, { status: 415 });

@@ -31,7 +31,9 @@ export async function middleware(request) {
   else{
     if(!isAuthenticated)
       {
-        return NextResponse.redirect(new URL('/auth', request.url));
+        const loginUrl = new URL('/auth', request.url);
+        loginUrl.searchParams.set('redirectTo', `${request.nextUrl.pathname}${request.nextUrl.search}`);
+        return NextResponse.redirect(loginUrl);
       }
   }
   

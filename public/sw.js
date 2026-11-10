@@ -46,3 +46,37 @@ self.addEventListener("fetch", (event) => {
     return response;
   }));
 });
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { body: event.data?.text() || "You have a new message." };
+  }
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (windows.some((client) => client.focused)) return;
+    await self.registration.showNotification(payload.title || "New message", {
+      body: payload.body || "You have a new message.",
+      icon: "/icons/icon.svg",
+      badge: "/icons/icon.svg",
+      tag: payload.tag || "convo-message",
+      data: { url: payload.url || "/" },
+    });
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || "/", self.location.origin);
+  if (target.origin !== self.location.origin) return;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windows) {
+      if ("navigate" in client) await client.navigate(target.href);
+      return client.focus();
+    }
+    return self.clients.openWindow(target.href);
+  })());
+});
