@@ -555,7 +555,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
               type="button"
               onClick={handleLeaveGroup}
             >
-              Leave From Group
+              Leave
             </button>
             {data?.is_admin ? (
               <>
@@ -566,7 +566,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
                   type="button"
                   onClick={handleDeleteGroup}
                 >
-                  Delete Group
+                  Delete
                 </button>
                 <button
                   disabled={isDisabled}
@@ -574,7 +574,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
                     }`}
                   type="submit"
                 >
-                  Update Group
+                  Update
                 </button>
               </>
             ) : null}
