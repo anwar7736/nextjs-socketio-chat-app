@@ -615,7 +615,10 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             </svg>
           </button>
           <div align="center">
-            <h1 className="font-bold">{data.name}</h1>
+            {data.photo ? (
+              <img src={getImageURL(data.photo)} alt={data.name} className="mb-3 h-20 w-20 rounded-full border border-[#263248] object-cover" />
+            ) : null}
+            <h1 className="break-words px-8 text-lg font-bold">{data.name}</h1>
             <div className="w-full max-w-md mt-5">
               <div className="mb-4">
                 <div>{data.phone}</div>

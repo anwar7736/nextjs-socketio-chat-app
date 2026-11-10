@@ -2,7 +2,7 @@
 import Picker from "emoji-picker-react";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FaPaperclip } from "react-icons/fa";
-import { FiCamera, FiMic, FiSquare } from "react-icons/fi";
+import { FiMic, FiSend, FiSquare } from "react-icons/fi";
 import { toast } from "react-toastify";
 import GroupEditOrViewModal from "./components/GroupEditOrViewModal";
 import Messages from "./components/Messages";
@@ -39,7 +39,6 @@ const Home = () => {
   const recorderRef = useRef(null);
   const recordingTimerRef = useRef(null);
   const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
   const messageInputRef = useRef(null);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
@@ -405,7 +404,9 @@ const Home = () => {
     setAttachmentError("");
     const supportedImageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
     const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i.test(file.name);
-    if (isImage && (optimizeImage || !supportedImageTypes.includes(file.type.toLowerCase()))) {
+    // Phone camera photos come through Attach now: shrink big ones (not GIFs, which would lose animation)
+    const isLargePhoto = isImage && file.size > 1.5 * 1024 * 1024 && file.type.toLowerCase() !== "image/gif";
+    if (isImage && (optimizeImage || isLargePhoto || !supportedImageTypes.includes(file.type.toLowerCase()))) {
       try {
         const bitmap = await createImageBitmap(file);
         const canvas = document.createElement("canvas");
@@ -546,7 +547,13 @@ const Home = () => {
                     </div>
                   )}
                   <ValidationError message={attachmentError} />
-                  <div className="flex items-center gap-2 rounded-2xl border border-[#263248] bg-[#0c1321] p-2 shadow-lg shadow-black/20">
+                  {replyTarget && (
+                    <div className="mb-2 flex min-w-0 items-center justify-between rounded-xl border border-indigo-400/20 bg-[#182235] px-3 py-2 text-xs">
+                      <span className="min-w-0 truncate text-[#c7d2e3]">Replying to {replyTarget.sender}: {replyTarget.text}</span>
+                      <button type="button" className="ml-3 shrink-0 text-base text-[#91a0b7]" onClick={() => setReplyTarget(null)} aria-label="Cancel reply">×</button>
+                    </div>
+                  )}
+                  <div className="composer-controls flex items-end gap-2 rounded-2xl border border-[#263248] bg-[#0c1321] p-2 shadow-lg shadow-black/20">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -557,20 +564,9 @@ const Home = () => {
                         event.target.value = "";
                       }}
                     />
-                    <input
-                      ref={cameraInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={(event) => {
-                        chooseAttachment(event.target.files?.[0], true);
-                        event.target.value = "";
-                      }}
-                    />
                     <button
                       type="button"
-                      className="rounded-xl p-3 text-[#91a0b7] hover:bg-[#263248] hover:text-white"
+                      className="composer-action rounded-xl p-3 text-[#91a0b7] hover:bg-[#263248] hover:text-white"
                       onClick={() => fileInputRef.current?.click()}
                       title="Attach a file"
                       aria-label="Attach a file"
@@ -579,14 +575,14 @@ const Home = () => {
                     </button>
                     <button
                       type="button"
-                      className={`rounded-xl p-3 ${recording ? "text-rose-300" : "text-[#91a0b7] hover:bg-[#263248] hover:text-white"}`}
+                      className={`composer-action rounded-xl p-3 ${recording ? "text-rose-300" : "text-[#91a0b7] hover:bg-[#263248] hover:text-white"}`}
                       onClick={toggleVoiceRecording}
                       title={recording ? "Stop recording" : "Record voice note"}
                       aria-label={recording ? "Stop recording" : "Record voice note"}
                     >
                       {recording ? <FiSquare /> : <FiMic />}
                     </button>
-                    <div className="relative">
+                    <div className="composer-action relative">
                       <button
                         type="button"
                         className="rounded-xl p-3 text-lg text-[#91a0b7] hover:bg-[#263248] hover:text-white"
@@ -599,28 +595,17 @@ const Home = () => {
                       {showPicker && (
                         <div className="emoji-picker-popover">
                           <Picker
-                            pickerStyle={{ width: "min(360px, calc(100vw - 28px))" }}
+                            theme="dark"
+                            width="100%"
+                            height={380}
+                            lazyLoadEmojis
+                            previewConfig={{ showPreview: false }}
                             onEmojiClick={onEmojiClick}
                           />
                         </div>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      className="rounded-xl p-3 text-[#91a0b7] hover:bg-[#263248] hover:text-white"
-                      title="Choose a photo from camera"
-                      aria-label="Take a photo"
-                      onClick={() => cameraInputRef.current?.click()}
-                    >
-                      <FiCamera />
-                    </button>
-                    <div className="relative w-full">
-                      {replyTarget && (
-                        <div className="mb-2 flex items-center justify-between rounded-xl border border-indigo-400/20 bg-[#182235] px-3 py-2 text-xs">
-                          <span className="truncate text-[#c7d2e3]">Replying to {replyTarget.sender}: {replyTarget.text}</span>
-                          <button type="button" className="ml-3 text-[#91a0b7]" onClick={() => setReplyTarget(null)} aria-label="Cancel reply">×</button>
-                        </div>
-                      )}
+                    <div className="composer-entry relative min-w-0 flex-1">
                       <div className="flex items-end gap-2">
                         <textarea
                           ref={messageInputRef}
@@ -644,15 +629,16 @@ const Home = () => {
                         />
                         <button
                           type="submit"
-                          className={`shrink-0 rounded-xl px-4 py-3 font-medium ${
+                          className={`composer-send flex shrink-0 items-center gap-2 rounded-xl px-4 py-3 font-medium ${
                             message.trim().length > 0 || attachment
                               ? "bg-indigo-500 hover:bg-indigo-400"
                               : "cursor-not-allowed bg-indigo-500/40"
                           } text-white`}
                           disabled={sending || (!message.trim() && !attachment)}
                           title="Send"
+                          aria-label="Send"
                         >
-                          {sending ? "..." : "Send"}
+                          {sending ? "..." : <><FiSend className="composer-send-icon" /><span className="composer-send-label">Send</span></>}
                         </button>
                       </div>
                       <ValidationError message={messageError} />

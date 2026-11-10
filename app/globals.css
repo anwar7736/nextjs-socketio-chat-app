@@ -185,10 +185,76 @@ textarea {
   color: var(--foreground);
 }
 
+.composer-send-icon {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .composer-send-icon {
+    display: block;
+    font-size: 18px;
+  }
+}
+
+/* member tables in the group modals: dark like the rest of the app (they used light-mode Tailwind classes) */
+.print-container hr {
+  margin: 20px 0 12px;
+  border-color: var(--border);
+}
+
+.print-container strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--foreground);
+}
+
+.print-container table {
+  width: 100%;
+  color: #c7d2e3;
+}
+
+.print-container thead {
+  background: var(--surface-raised) !important;
+  color: var(--muted) !important;
+}
+
+.print-container tbody tr {
+  border-color: var(--border) !important;
+  background: #0c1321 !important;
+}
+
+.print-container tbody tr:hover {
+  background: var(--surface-raised) !important;
+}
+
+.print-container th,
+.print-container td {
+  padding: 10px 12px !important;
+  vertical-align: middle;
+}
+
+.print-container td img {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-color: var(--border) !important;
+}
+
+.print-container input[type="checkbox"] {
+  accent-color: var(--accent-strong);
+}
+
+.print-container .overflow-x-auto {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
 .emoji-picker-popover {
   position: absolute;
   z-index: 30;
-  right: 0;
+  left: 0;
   bottom: calc(100% + 12px);
   overflow: hidden;
   width: min(360px, calc(100vw - 28px));
@@ -369,22 +435,94 @@ body.swal2-shown .swal2-html-container {
     padding: 18px 14px 130px;
   }
 
+  /* one tight row: [clip][mic][emoji][ message box ...... ][send] */
   .message-composer {
-    padding: 12px 12px max(16px, env(safe-area-inset-bottom));
+    padding: 8px 6px max(8px, env(safe-area-inset-bottom));
   }
 
-  .message-composer > div > div {
-    gap: 2px;
-    padding: 5px;
+  .composer-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: flex-end;
+    gap: 0;
+    padding: 4px;
+    border-radius: 18px;
   }
 
-  .message-composer button {
-    padding: 10px;
+  .composer-action {
+    flex: 0 0 auto;
+    padding: 0;
+  }
+
+  .composer-controls > button.composer-action,
+  .composer-action > button {
+    display: grid;
+    width: 36px;
+    height: 44px;
+    place-items: center;
+    padding: 0;
+  }
+
+  .composer-entry {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 2px;
+  }
+
+  .composer-entry > div.flex {
+    gap: 4px;
+  }
+
+  .composer-entry textarea {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding: 10px 12px;
+  }
+
+  .composer-send {
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    padding: 0 !important;
+  }
+
+  .composer-send-label {
+    display: none;
+  }
+
+  /* the emoji button sits at the far left: open the picker across the screen, above the composer */
+  .emoji-picker-popover {
+    position: fixed;
+    right: 8px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    left: 8px;
+    width: auto;
   }
 
   .message-selection-bar {
     padding-right: 12px;
     padding-left: 12px;
+  }
+
+  .auth-shell {
+    min-height: 100svh;
+    padding: 16px;
+  }
+
+  .auth-card {
+    padding: 20px;
+  }
+
+  .auth-card > div:first-child {
+    margin-bottom: 18px;
+  }
+
+  .auth-shell > div > p {
+    margin-top: 16px;
+  }
+
+  .auth-card .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 12px;
   }
 }
 
