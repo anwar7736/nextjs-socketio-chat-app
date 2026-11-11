@@ -91,6 +91,17 @@ const Home = () => {
   const emojiRef = useRef(null);
   const userListRequestRef = useRef(0);
   const allowAppExitRef = useRef(false);
+  const syncChatViewport = useCallback(() => {
+    const viewport = window.visualViewport;
+    document.documentElement.style.setProperty(
+      "--chat-viewport-height",
+      `${viewport?.height || window.innerHeight}px`
+    );
+    document.documentElement.style.setProperty(
+      "--chat-viewport-top",
+      `${viewport?.offsetTop || 0}px`
+    );
+  }, []);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
     setMessage((msg) => msg + emojiObject.emoji); // picker stays open, like WhatsApp, for several emojis
@@ -115,6 +126,40 @@ const Home = () => {
     window.addEventListener("beforeunload", confirmClose);
     return () => window.removeEventListener("beforeunload", confirmClose);
   }, [authUser?._id]);
+
+  useEffect(() => {
+    syncChatViewport();
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", syncChatViewport);
+    viewport?.addEventListener("scroll", syncChatViewport);
+    window.addEventListener("resize", syncChatViewport);
+    return () => {
+      viewport?.removeEventListener("resize", syncChatViewport);
+      viewport?.removeEventListener("scroll", syncChatViewport);
+      window.removeEventListener("resize", syncChatViewport);
+      document.documentElement.style.removeProperty("--chat-viewport-height");
+      document.documentElement.style.removeProperty("--chat-viewport-top");
+    };
+  }, [syncChatViewport]);
+
+  useEffect(() => {
+    const lockPageScroll = () => {
+      document.documentElement.classList.add("chat-input-focused");
+      document.body.classList.add("chat-input-focused");
+    };
+    const unlockPageScroll = () => {
+      document.documentElement.classList.remove("chat-input-focused");
+      document.body.classList.remove("chat-input-focused");
+    };
+    const input = messageInputRef.current;
+    input?.addEventListener("focus", lockPageScroll);
+    input?.addEventListener("blur", unlockPageScroll);
+    return () => {
+      input?.removeEventListener("focus", lockPageScroll);
+      input?.removeEventListener("blur", unlockPageScroll);
+      unlockPageScroll();
+    };
+  }, [user?._id]);
 
   useEffect(() => {
     if (!authUser?._id) return;

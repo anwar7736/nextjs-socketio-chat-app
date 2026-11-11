@@ -32,6 +32,12 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+html.chat-input-focused,
+body.chat-input-focused {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 button,
 input,
 textarea {
@@ -54,8 +60,10 @@ textarea {
 
 .chat-shell {
   position: fixed;
-  inset: 0;
-  height: 100dvh;
+  top: var(--chat-viewport-top, 0px);
+  right: 0;
+  left: 0;
+  height: var(--chat-viewport-height, 100dvh);
   overflow: hidden;
   overscroll-behavior: none;
   padding: 18px;
@@ -92,7 +100,8 @@ textarea {
 }
 
 .conversation-header {
-  position: relative;
+  position: sticky;
+  top: 0;
   flex: 0 0 auto;
   z-index: 30;
   isolation: isolate;
@@ -102,6 +111,7 @@ textarea {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px clamp(16px, 5vw, 72px);
   scrollbar-color: #394761 transparent;
 }
