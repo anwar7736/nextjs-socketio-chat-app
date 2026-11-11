@@ -8,6 +8,7 @@ import GroupEditOrViewModal from "./components/GroupEditOrViewModal";
 import Messages from "./components/Messages";
 import Sidebar from "./components/Sidebar";
 import CallControls from "./components/CallControls";
+import ConversationMenu from "./components/ConversationMenu";
 import ValidationError from "./components/ValidationError";
 import { MessageContext } from "./contexts/MessageContext";
 import { UserContext } from "./contexts/UserContext";
@@ -98,6 +99,19 @@ const Home = () => {
   const typingTimerRef = useRef(null);
   const typingActiveRef = useRef(false);
   const typingUsersTimersRef = useRef(new Map());
+  const mutedConversationsRef = useRef(new Set());
+  useEffect(() => {
+    const updateMuted = (event) => {
+      const { conversationId, muted } = event.detail || {};
+      if (!conversationId) return;
+      const next = new Set(mutedConversationsRef.current);
+      if (muted) next.add(conversationId);
+      else next.delete(conversationId);
+      mutedConversationsRef.current = next;
+    };
+    window.addEventListener("chat:mute-change", updateMuted);
+    return () => window.removeEventListener("chat:mute-change", updateMuted);
+  }, []);
   const syncChatViewport = useCallback(() => {
     const viewport = window.visualViewport;
     document.documentElement.style.setProperty(
@@ -476,7 +490,14 @@ const Home = () => {
   const loadRealTimeMessages = () => {
     socket.off("private-message");
     socket.on("private-message", async (data) => {
-      if (data?.sender_id !== authUser?._id && document.visibilityState === "visible") {
+      const notificationConversationId = data?.is_group == 1
+        ? data?.receiver_id
+        : data?.sender_id === authUser?._id ? data?.receiver_id : data?.sender_id;
+      if (
+        data?.sender_id !== authUser?._id &&
+        document.visibilityState === "visible" &&
+        !mutedConversationsRef.current.has(String(notificationConversationId))
+      ) {
         playMessageReminder();
       }
       if (
@@ -583,8 +604,19 @@ const Home = () => {
 
     socket.off("message-deleted");
     socket.on("message-deleted", (data) => {
-      setMessages((current) => (current || []).filter((item) =>
-        item?._id !== data?._id && (!data?.message_id || item?.message_id !== data.message_id)
+      setMessages((current) => (current || []).map((item) =>
+        item?.message_id === data?.message_id
+          ? { ...item, message: { ...item.message, message: "", attachmentUrl: "", attachmentName: "", deletedForEveryone: true, reactions: [] } }
+          : item
+      ));
+    });
+
+    socket.off("message-edited");
+    socket.on("message-edited", (data) => {
+      setMessages((current) => (current || []).map((item) =>
+        item?.message_id === data?.message_id
+          ? { ...item, message: { ...item.message, message: data.message, editedAt: data.editedAt } }
+          : item
       ));
     });
 
@@ -832,16 +864,7 @@ const Home = () => {
                 showButtons={Boolean(user)}
                 blocked={Boolean(user?.blocked || user?.blockedByPartner)}
               />
-              {user && (
-                <button
-                  type="button"
-                  className="rounded-xl p-2 text-sm text-gray-300 hover:bg-[#263248]"
-                  onClick={handleEditOrViewModal}
-                  aria-label="Conversation details"
-                >
-                  ⋯
-                </button>
-              )}
+              {user && <ConversationMenu conversation={user} onViewContact={handleEditOrViewModal} />}
             </div>
           </header>
           {user ? (

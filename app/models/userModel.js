@@ -14,6 +14,7 @@ const userModel = new mongoose.Schema({
     "lastSeenAt": Date,
     "nicknames": { type: Map, of: String },
     "archivedConversations": [{ type: mongoose.Schema.Types.ObjectId }],
+    "mutedConversations": [{ type: mongoose.Schema.Types.ObjectId }],
     "blockedUsers": [{ type: mongoose.Schema.Types.ObjectId }],
     "status": {type: Number, default: 1 }, // 0=>inactive, 1=>active
 }, {

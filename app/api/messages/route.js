@@ -30,15 +30,22 @@ export async function GET(request) {
   const referenceId = new mongoose.Types.ObjectId(refId);
   let match;
   let unreadLogs;
+  const markRead = query.get("mark_read") !== "0";
+  const allMessages = query.get("all") === "1";
+  const requestedOffset = Number(query.get("offset") || 0);
+  const messageLimit = allMessages ? 500 : 200;
+  const messageOffset = allMessages && Number.isSafeInteger(requestedOffset) && requestedOffset >= 0
+    ? requestedOffset
+    : 0;
   if (isGroup) {
     const membership = await groupMemberSchema.exists({ group_id: referenceId, user_id: currentUserId, status: 1 });
     if (!membership) return NextResponse.json({ success: false, message: "You are not a member of this group." }, { status: 403 });
-    unreadLogs = await messageLogSchema.find({
+    unreadLogs = markRead ? await messageLogSchema.find({
       group_id: referenceId,
       receiver_id: currentUserId,
       status: 0,
-    }).select("message_id sender_id").limit(200).lean();
-    await messageLogSchema.updateMany(
+    }).select("message_id sender_id").limit(200).lean() : [];
+    if (markRead) await messageLogSchema.updateMany(
       { group_id: referenceId, receiver_id: currentUserId, status: 0 },
       { $set: { status: 1 } }
     );
@@ -47,13 +54,13 @@ export async function GET(request) {
     if (referenceId.equals(currentUserId)) {
       return NextResponse.json({ success: false, message: "A conversation partner is required." }, { status: 400 });
     }
-    unreadLogs = await messageLogSchema.find({
+    unreadLogs = markRead ? await messageLogSchema.find({
       sender_id: referenceId,
       receiver_id: currentUserId,
       group_id: { $exists: false },
       status: 0,
-    }).select("message_id sender_id").sort({ createdAt: -1 }).limit(200).lean();
-    await messageLogSchema.updateMany(
+    }).select("message_id sender_id").sort({ createdAt: -1 }).limit(200).lean() : [];
+    if (markRead) await messageLogSchema.updateMany(
       { sender_id: referenceId, receiver_id: currentUserId, group_id: { $exists: false }, status: 0 },
       { $set: { status: 1 } }
     );
@@ -70,8 +77,9 @@ export async function GET(request) {
 
   const data = await messageLogSchema.aggregate([
     { $match: match },
-    { $sort: { createdAt: -1 } },
-    { $limit: 200 },
+    { $sort: { createdAt: -1, _id: -1 } },
+    ...(messageOffset ? [{ $skip: messageOffset }] : []),
+    { $limit: messageLimit },
     { $lookup: { from: "groups", localField: "group_id", foreignField: "_id", as: "group" } },
     { $unwind: { path: "$group", preserveNullAndEmptyArrays: true } },
     { $lookup: { from: "messages", localField: "message_id", foreignField: "_id", as: "message" } },
@@ -123,6 +131,9 @@ export async function GET(request) {
         "message.reply_to": 1,
         "message.reactions": 1,
         "message.createdAt": 1,
+        "message.editedAt": 1,
+        "message.deletedForEveryone": 1,
+        "message.hiddenFor": 1,
         "sender._id": 1,
         "sender.name": 1,
         "sender.photo": 1,
@@ -134,8 +145,12 @@ export async function GET(request) {
     { $sort: { "message.createdAt": 1 } },
   ]);
 
+  const visibleData = data.filter((item) =>
+    item.status !== 2 &&
+    !(item.message?.hiddenFor || []).some((id) => String(id) === sessionUserId)
+  );
   const memberIds = new Set();
-  for (const item of data) {
+  for (const item of visibleData) {
     for (const id of item.seen_by_ids || []) memberIds.add(String(id));
     for (const reaction of item.message?.reactions || []) memberIds.add(String(reaction.user_id));
   }
@@ -144,7 +159,7 @@ export async function GET(request) {
       .select("name photo").lean()
     : [];
   const profilesById = new Map(memberProfiles.map((profile) => [String(profile._id), profile]));
-  const enrichedData = data.map((item) => {
+  const enrichedData = visibleData.map((item) => {
     const seenBy = (item.seen_by_ids || [])
       .map((id) => profilesById.get(String(id)))
       .filter(Boolean)
@@ -160,7 +175,7 @@ export async function GET(request) {
     return {
       ...item,
       seen_by: seenBy,
-      message: { ...item.message, reactions },
+      message: { ...item.message, reactions, hiddenFor: undefined },
       seen_by_ids: undefined,
     };
   });
@@ -195,7 +210,12 @@ export async function GET(request) {
     })
     : [];
 
-  return NextResponse.json({ success: true, data: enrichedData, seen_events: seenEvents });
+  return NextResponse.json({
+    success: true,
+    data: enrichedData,
+    seen_events: seenEvents,
+    ...(allMessages ? { has_more: data.length === messageLimit } : {}),
+  });
 }
 
 export async function POST(request) {
@@ -302,7 +322,15 @@ export async function POST(request) {
 
   // Notification like WhatsApp: "<sender>" (or "<sender> @ <group>") with the text; tapping it opens that chat.
   // For a direct message the chat to open on the receiver's phone is the SENDER's (receiver_id is the receiver).
-  const pushRecipients = (isGroup ? recipientIds : [receiver_id]).filter((id) => id !== sessionUserId);
+  const candidatePushRecipients = (isGroup ? recipientIds : [receiver_id]).filter((id) => id !== sessionUserId);
+  const mutedUsers = candidatePushRecipients.length
+    ? await userSchema.find({
+      _id: { $in: candidatePushRecipients.map((id) => new mongoose.Types.ObjectId(id)) },
+      mutedConversations: receiverId,
+    }).distinct("_id")
+    : [];
+  const mutedUserIds = new Set(mutedUsers.map(String));
+  const pushRecipients = candidatePushRecipients.filter((id) => !mutedUserIds.has(id));
   const pendingCounts = pushRecipients.length
     ? await messageLogSchema.aggregate([
         { $match: { receiver_id: { $in: pushRecipients.map((id) => new mongoose.Types.ObjectId(id)) }, status: 0 } },

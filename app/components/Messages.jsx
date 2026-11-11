@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import Picker from "emoji-picker-react";
-import { FiArrowLeft, FiChevronDown, FiCornerUpLeft, FiPlus, FiTrash2, FiX } from "react-icons/fi";
+import { FiArrowLeft, FiChevronDown, FiCornerUpLeft, FiCopy, FiEdit2, FiPlus, FiTrash2, FiX } from "react-icons/fi";
 import { dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
 import { AuthContext } from "../contexts/AuthContext";
 import { UserContext } from "../contexts/UserContext";
@@ -29,6 +29,12 @@ const Messages = () => {
   const [preview, setPreview] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [deleteMode, setDeleteMode] = useState("default");
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const selecting = selectedIds.length > 0;
 
   // Stay at the newest message: on new messages, and while photos/videos above it finish loading
@@ -112,6 +118,36 @@ const Messages = () => {
   }, []);
 
   useEffect(() => {
+    const onSearch = (event) => {
+      if (event.detail?.item) {
+        const item = event.detail.item;
+        const loaded = (messagesRef.current || []).some((current) => current?._id === item._id);
+        if (!loaded) {
+          setMessages((current) => [...(current || []), item].sort((a, b) =>
+            new Date(a.message?.createdAt || 0).getTime() - new Date(b.message?.createdAt || 0).getTime()
+          ));
+        }
+        window.setTimeout(() => {
+          document.getElementById(`message-${item._id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 50);
+        return;
+      }
+      const query = String(event.detail?.query || "").trim().toLowerCase();
+      if (!query) return;
+      const match = (messagesRef.current || []).find((item) =>
+        String(item?.message?.message || "").toLowerCase().includes(query)
+      );
+      if (!match) {
+        toast.info("No matching message in the loaded conversation.");
+        return;
+      }
+      document.getElementById(`message-${match._id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    window.addEventListener("chat:search", onSearch);
+    return () => window.removeEventListener("chat:search", onSearch);
+  }, []);
+
+  useEffect(() => {
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       if (deleteConfirmationOpen) setDeleteConfirmationOpen(false);
@@ -136,8 +172,10 @@ const Messages = () => {
   }, [emojiPickerFor]);
 
   /* ---------- delete ---------- */
-  const removeMessage = async (msg) => {
-    const method = msg?.sender?._id === user?._id ? "DELETE" : "PATCH"; // mine: for everyone, theirs: for me
+  const removeMessage = async (msg, mode = "default") => {
+    const mine = msg?.sender?._id === user?._id;
+    const deleteForEveryone = mine && mode !== "for-me";
+    const method = deleteForEveryone ? "DELETE" : "PATCH";
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
     let response;
@@ -159,10 +197,12 @@ const Messages = () => {
       throw new Error(result.message || "Unable to remove this message.");
     }
 
-    if (method === "DELETE") {
+    if (deleteForEveryone) {
       const deletedMessageId = result.message_id;
-      setMessages((current) => (current || []).filter((item) =>
-        item?._id !== result.log_id && item?.message_id !== deletedMessageId
+      setMessages((current) => (current || []).map((item) =>
+        item?.message_id === deletedMessageId
+          ? { ...item, message: { ...item.message, message: "", attachmentUrl: "", attachmentName: "", deletedForEveryone: true, reactions: [] } }
+          : item
       ));
       socket.emit("message-deleted", JSON.stringify({
         _id: result.log_id,
@@ -177,7 +217,10 @@ const Messages = () => {
   };
 
   const openDeleteConfirmation = () => {
-    if (selectedIds.length && !deleting) setDeleteConfirmationOpen(true);
+    if (selectedIds.length && !deleting) {
+      setDeleteMode("default");
+      setDeleteConfirmationOpen(true);
+    }
   };
 
   const confirmDeleteSelected = async () => {
@@ -186,7 +229,7 @@ const Messages = () => {
     setDeleteConfirmationOpen(false);
     setDeleting(true);
     try {
-      const results = await Promise.allSettled(selected.map((msg) => removeMessage(msg)));
+      const results = await Promise.allSettled(selected.map((msg) => removeMessage(msg, deleteMode)));
       const failed = results.find((result) => result.status === "rejected");
       if (failed) throw failed.reason;
       clearSelection();
@@ -194,6 +237,56 @@ const Messages = () => {
       toast.error(error.message || "Unable to remove a selected message.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const copySelectedMessage = async () => {
+    const msg = selectedMessages[0]?.message;
+    const text = msg?.message || msg?.attachmentUrl;
+    if (!text) {
+      toast.info("This message has no text to copy.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Message copied.");
+      clearSelection();
+    } catch {
+      toast.error("Unable to copy this message.");
+    }
+  };
+
+  const openEditMessage = () => {
+    const selected = selectedMessages[0];
+    if (!selected || selected?.sender?._id !== user?._id || selected?.message?.type !== "text") return;
+    setEditingMessage(selected);
+    setEditText(selected.message.message || "");
+  };
+
+  const saveEditedMessage = async (event) => {
+    event.preventDefault();
+    if (!editingMessage || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      const response = await fetch(`/api/messages/${editingMessage._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "edit", text: editText }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.message || "Unable to edit this message.");
+      setMessages((current) => (current || []).map((item) =>
+        item?.message_id === result.message_id
+          ? { ...item, message: { ...item.message, message: result.message, editedAt: result.editedAt } }
+          : item
+      ));
+      socket.emit("message-edited", result.socket_event);
+      setEditingMessage(null);
+      clearSelection();
+    } catch (error) {
+      toast.error(error.message || "Unable to edit this message.");
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -351,6 +444,16 @@ const Messages = () => {
                 <FiCornerUpLeft />
               </button>
             )}
+            {selectedIds.length === 1 && (
+              <button type="button" className="selection-icon-button" onClick={copySelectedMessage} aria-label="Copy message" title="Copy">
+                <FiCopy />
+              </button>
+            )}
+            {selectedIds.length === 1 && selectedMessages[0]?.sender?._id === user?._id && selectedMessages[0]?.message?.type === "text" && (
+              <button type="button" className="selection-icon-button" onClick={openEditMessage} aria-label="Edit message" title="Edit">
+                <FiEdit2 />
+              </button>
+            )}
             <button
               type="button"
               className="selection-icon-button is-danger"
@@ -391,12 +494,16 @@ const Messages = () => {
               Delete {selectedIds.length} message{selectedIds.length > 1 ? "s" : ""}?
             </h2>
             <p id="delete-confirmation-description">
-              {ownSelectedCount > 0 &&
-                `${ownSelectedCount} of your message${ownSelectedCount > 1 ? "s" : ""} will be deleted for everyone.`}
-              {ownSelectedCount > 0 && receivedSelectedCount > 0 && " "}
-              {receivedSelectedCount > 0 &&
-                `${receivedSelectedCount} received message${receivedSelectedCount > 1 ? "s" : ""} will be removed for you.`}
+              {deleteMode === "for-me" && ownSelectedCount === selectedMessages.length
+                ? "Your message will be removed only from this conversation view."
+                : `${ownSelectedCount} of your message${ownSelectedCount === 1 ? "" : "s"} will be deleted for everyone and ${receivedSelectedCount} received message${receivedSelectedCount === 1 ? "" : "s"} will be removed for you.`}
             </p>
+            {ownSelectedCount > 0 && selectedMessages.length === 1 && (
+              <div className="confirmation-delete-options">
+                <label><input type="radio" checked={deleteMode === "for-me"} onChange={() => setDeleteMode("for-me")} /> Delete for me</label>
+                <label><input type="radio" checked={deleteMode !== "for-me"} onChange={() => setDeleteMode("default")} /> Delete for everyone</label>
+              </div>
+            )}
             <div className="confirmation-actions">
               <button type="button" className="confirmation-cancel" onClick={() => setDeleteConfirmationOpen(false)}>
                 Cancel
@@ -406,6 +513,19 @@ const Messages = () => {
               </button>
             </div>
           </section>
+        </div>
+      )}
+      {editingMessage && (
+        <div className="confirmation-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !savingEdit) setEditingMessage(null); }}>
+          <form className="confirmation-dialog" role="dialog" aria-modal="true" onSubmit={saveEditedMessage}>
+            <button type="button" className="confirmation-close" onClick={() => setEditingMessage(null)} aria-label="Close edit message"><FiX /></button>
+            <h2>Edit message</h2>
+            <textarea autoFocus maxLength={5000} value={editText} onChange={(event) => setEditText(event.target.value)} />
+            <div className="confirmation-actions">
+              <button type="button" className="confirmation-cancel" onClick={() => setEditingMessage(null)} disabled={savingEdit}>Cancel</button>
+              <button type="submit" className="confirmation-accept" disabled={savingEdit || !editText.trim()}>{savingEdit ? "Saving..." : "Save"}</button>
+            </div>
+          </form>
         </div>
       )}
       {reactionDetailsFor && reactionDetailsMessage && (
@@ -476,6 +596,7 @@ const Messages = () => {
           const dx = swipe.id === data?._id ? swipe.dx : 0;
           return (
             <div
+              id={`message-${data?._id}`}
               key={data?._id}
               className={`message-row ${reactions.length ? "mb-7" : "mb-4"} ${selected ? "is-selected" : ""} ${selecting ? "is-selecting" : ""}`}
               onClick={(event) => {
@@ -536,7 +657,14 @@ const Messages = () => {
                         ↪ {repliedTo?.sender?._id === user?._id ? "You" : repliedTo?.sender?.name || "Message"}: {repliedTo?.message?.message || repliedTo?.message?.attachmentName || "Reply"}
                       </p>
                     )}
-                    <MessageContent message={data?.message} onPreview={selecting ? null : openPreview} />
+                    {data?.message?.deletedForEveryone ? (
+                      <p className="italic opacity-75">This message was deleted.</p>
+                    ) : (
+                      <MessageContent message={data?.message} onPreview={selecting ? null : openPreview} />
+                    )}
+                    {!data?.message?.deletedForEveryone && data?.message?.editedAt && (
+                      <span className="ml-2 text-[10px] italic opacity-70">Edited</span>
+                    )}
                   </div>
                   {reactions.length > 0 && (
                     <div className={`message-reactions ${mine ? "right-2" : "left-2"}`}>

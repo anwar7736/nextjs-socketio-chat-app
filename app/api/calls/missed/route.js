@@ -59,6 +59,14 @@ export async function POST(request) {
   }
   if (!recipients.length) return NextResponse.json({ success: false, message: "Nobody to notify." }, { status: 400 });
 
+  const mutedUsers = await userSchema.find({
+    _id: { $in: recipients.map((id) => new mongoose.Types.ObjectId(id)) },
+    mutedConversations: new mongoose.Types.ObjectId(conversationId),
+  }).distinct("_id");
+  const mutedUserIds = new Set(mutedUsers.map(String));
+  recipients = recipients.filter((id) => !mutedUserIds.has(id));
+  if (!recipients.length) return NextResponse.json({ success: true, muted: true });
+
   const caller = await userSchema.findById(userId).select("name").lean();
   const ticketId = isGroup ? conversationId : userId;
   const pendingCounts = await messageLogSchema.aggregate([

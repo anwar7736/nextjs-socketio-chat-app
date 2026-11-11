@@ -9,6 +9,9 @@ const messageModel = new mongoose.Schema({
     "attachmentName": String,
     "mimeType": String,
     "reply_to": mongoose.Schema.Types.ObjectId,
+    "editedAt": Date,
+    "deletedForEveryone": { type: Boolean, default: false },
+    "hiddenFor": [{ type: mongoose.Schema.Types.ObjectId }],
     "reactions": [{
         _id: false,
         user_id: mongoose.Schema.Types.ObjectId,

@@ -19,13 +19,21 @@ export async function PATCH(request, context) {
   if (!objectIdPattern.test(messageLogId)) return NextResponse.json({ success: false, message: "Invalid message." }, { status: 400 });
 
   await mongoDB_connect();
-  const log = await messageLogSchema.findOneAndUpdate(
-    { _id: messageLogId, receiver_id: new mongoose.Types.ObjectId(userId) },
-    { $set: { status: 2 } },
-    { new: true }
-  );
+  const log = await messageLogSchema.findById(messageLogId).select("message_id sender_id receiver_id");
   if (!log) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
-  return NextResponse.json({ success: true, message: "Message hidden.", message_id: messageLogId });
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  if (log.receiver_id.equals(userObjectId)) {
+    log.status = 2;
+    await log.save();
+  } else if (log.sender_id.equals(userObjectId)) {
+    await messageSchema.updateOne(
+      { _id: log.message_id, sender_id: userObjectId },
+      { $addToSet: { hiddenFor: userObjectId } }
+    );
+  } else {
+    return NextResponse.json({ success: false, message: "You cannot hide this message." }, { status: 403 });
+  }
+  return NextResponse.json({ success: true, message: "Message hidden.", log_id: messageLogId, message_id: String(log.message_id) });
 }
 
 export async function DELETE(request, context) {
@@ -41,16 +49,26 @@ export async function DELETE(request, context) {
   }).select("message_id group_id receiver_id");
   if (!log) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
 
-  const recipientIds = log.group_id
-    ? (await messageLogSchema.find({ message_id: log.message_id }).distinct("receiver_id")).map(String)
-    : [String(log.receiver_id)];
-  const message = await messageSchema.findOneAndDelete({
+  const recipientIds = (await messageLogSchema.find({ message_id: log.message_id }).distinct("receiver_id")).map(String);
+  const message = await messageSchema.findOne({
     _id: log.message_id,
     sender_id: new mongoose.Types.ObjectId(userId),
-  }).select("attachmentUrl");
-  if (!message) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
-  await messageLogSchema.deleteMany({ message_id: log.message_id });
-  const filename = message.attachmentUrl?.match(/^\/api\/attachments\/([a-f\d]{24})_([a-f\d-]{36}\.(?:jpg|png|gif|webp|webm|ogg|mp3|m4a|mp4|mov|pdf))$/i);
+  }).select("attachmentUrl group_id");
+  if (!message || message.deletedForEveryone) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
+  const attachmentUrl = message.attachmentUrl;
+  await messageSchema.updateOne(
+    { _id: message._id, sender_id: new mongoose.Types.ObjectId(userId) },
+    { $set: {
+      message: "",
+      attachmentUrl: "",
+      attachmentName: "",
+      mimeType: "",
+      deletedForEveryone: true,
+      editedAt: null,
+      reactions: [],
+    } }
+  );
+  const filename = attachmentUrl?.match(/^\/api\/attachments\/([a-f\d]{24})_([a-f\d-]{36}\.(?:jpg|png|gif|webp|webm|ogg|mp3|m4a|mp4|mov|pdf))$/i);
   if (filename && filename[1] === userId) {
     await removeFile(`${filename[1]}_${filename[2]}`);
     try {
@@ -86,6 +104,39 @@ export async function PUT(request, context) {
   } catch {
     return NextResponse.json({ success: false, message: "Invalid request body." }, { status: 400 });
   }
+  if (body?.action === "edit") {
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text || text.length > 5000) {
+      return NextResponse.json({ success: false, message: "Message text must be between 1 and 5000 characters." }, { status: 400 });
+    }
+    await mongoDB_connect();
+    const log = await messageLogSchema.findOne({ _id: messageLogId, sender_id: new mongoose.Types.ObjectId(userId) })
+      .select("message_id group_id receiver_id sender_id");
+    if (!log) return NextResponse.json({ success: false, message: "You can only edit your own message." }, { status: 403 });
+    const message = await messageSchema.findOneAndUpdate(
+      { _id: log.message_id, sender_id: new mongoose.Types.ObjectId(userId), type: "text", deletedForEveryone: { $ne: true } },
+      { $set: { message: text, editedAt: new Date() } },
+      { new: true }
+    ).select("message editedAt");
+    if (!message) return NextResponse.json({ success: false, message: "Only active text messages can be edited." }, { status: 400 });
+    const recipientIds = [...new Set((await messageLogSchema.find({ message_id: log.message_id }).distinct("receiver_id")).map(String))];
+    const event = {
+      actor_id: userId,
+      message_id: String(log.message_id),
+      message: message.message,
+      editedAt: message.editedAt.toISOString(),
+      recipient_ids: recipientIds,
+    };
+    const secret = process.env.AUTH_SECRET ||
+      (process.env.NODE_ENV !== "production" && "local-development-only-secret-change-before-deploy");
+    if (!secret) return NextResponse.json({ success: false, message: "Realtime message editing is not configured." }, { status: 500 });
+    const issuedAt = Date.now();
+    const signature = createHmac("sha256", secret)
+      .update(JSON.stringify({ event, issuedAt }))
+      .digest("base64url");
+    return NextResponse.json({ success: true, message_id: String(log.message_id), message: message.message, editedAt: message.editedAt, socket_event: { ...event, issuedAt, signature } });
+  }
+
   if (!isEmoji(body?.emoji)) {
     return NextResponse.json({ success: false, message: "Choose a supported reaction." }, { status: 400 });
   }
@@ -95,7 +146,7 @@ export async function PUT(request, context) {
     .select("message_id group_id sender_id receiver_id");
   if (!log) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
   const message = await messageSchema.findById(log.message_id);
-  if (!message) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
+  if (!message || message.deletedForEveryone) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
   if (!log.receiver_id.equals(new mongoose.Types.ObjectId(userId)) && !message.sender_id.equals(new mongoose.Types.ObjectId(userId))) {
     return NextResponse.json({ success: false, message: "You cannot react to this message." }, { status: 403 });
   }

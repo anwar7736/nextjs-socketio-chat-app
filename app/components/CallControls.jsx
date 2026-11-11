@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FaVideo } from "react-icons/fa";
-import { FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiVideo, FiVideoOff } from "react-icons/fi";
+import { FiArrowLeft, FiClock, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiVideo, FiVideoOff, FiX } from "react-icons/fi";
 import { MdAddIcCall } from "react-icons/md";
 import { toast } from "react-toastify";
 import { UserListContext } from "../contexts/UserListContext";
@@ -63,8 +63,15 @@ function useTone(kind, playing, loop = true) {
     if (!playing || !kind) return;
     const audio = new Audio(getTones()[kind]);
     audio.loop = loop;
+    let plays = 0;
+    const playTwice = () => {
+      plays += 1;
+      if (kind === "ring" && plays < 2) audio.play().catch(() => {});
+    };
+    if (kind === "ring") audio.addEventListener("ended", playTwice);
     audio.play().catch(() => {}); // browsers may refuse sound before the first tap; vibration/notification still work
     return () => {
+      audio.removeEventListener("ended", playTwice);
       audio.pause();
       audio.src = "";
     };
@@ -92,6 +99,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [cameraOff, setCameraOff] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [callMinimized, setCallMinimized] = useState(false);
+  const [callHistoryOpen, setCallHistoryOpen] = useState(false);
+  const [callHistory, setCallHistory] = useState([]);
+  const [remoteMedia, setRemoteMedia] = useState({});
+  const [audioDevices, setAudioDevices] = useState([]);
+  const [audioInputId, setAudioInputId] = useState("");
+  const [audioOutputId, setAudioOutputId] = useState("");
 
   const personFor = useCallback((id) => (Array.isArray(users) ? users.find((item) => item?._id === id) : null), [users]);
 
@@ -113,7 +127,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const stopCall = useCallback((notify = true) => {
     const active = callRef.current;
-    if (notify && active) socket.emit("call:end", { callId: active.callId });
+    if (notify && active) {
+      socket.emit("call:end", { callId: active.callId });
+      updateCallLog(active.callId, "ended");
+    }
     for (const peer of peersRef.current.values()) peer.close();
     peersRef.current.clear();
     pendingCandidatesRef.current.clear();
@@ -125,7 +142,84 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     setMuted(false);
     setCameraOff(false);
     setFacingMode("user");
+    setCallMinimized(false);
+    setRemoteMedia({});
   }, []);
+
+  const updateCallLog = async (callId, action, details) => {
+    try {
+      const response = await fetch("/api/calls/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, action, ...details }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.message || "Unable to update call history.");
+    } catch (error) {
+      console.error("Unable to save call history:", error);
+      toast.error(error.message || "Unable to save call history.");
+    }
+  };
+
+  const loadCallHistory = useCallback(async () => {
+    try {
+      const response = await fetch("/api/calls/history");
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Unable to load call history.");
+      setCallHistory(result.data || []);
+    } catch (error) {
+      console.error("Unable to load call history:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (conversation?._id) loadCallHistory();
+  }, [conversation?._id, loadCallHistory]);
+
+  useEffect(() => {
+    if (!call) return;
+    navigator.mediaDevices?.enumerateDevices?.().then((devices) => {
+      setAudioDevices(devices.filter((device) => device.kind === "audioinput" || device.kind === "audiooutput"));
+    }).catch((error) => console.error("Unable to enumerate audio devices:", error));
+  }, [call]);
+
+  const changeAudioInput = async (deviceId) => {
+    const stream = localStreamRef.current;
+    if (!stream || !deviceId) return;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true }, video: false });
+      const nextTrack = fresh.getAudioTracks()[0];
+      nextTrack.enabled = !muted;
+      for (const peer of peersRef.current.values()) {
+        const sender = peer.getSenders().find((item) => item.track?.kind === "audio");
+        await sender?.replaceTrack(nextTrack);
+      }
+      const oldTrack = stream.getAudioTracks()[0];
+      if (oldTrack) {
+        stream.removeTrack(oldTrack);
+        oldTrack.stop();
+      }
+      stream.addTrack(nextTrack);
+      setAudioInputId(deviceId);
+    } catch (error) {
+      toast.error(error.message || "Unable to switch microphone.");
+    }
+  };
+
+  const changeAudioOutput = async (deviceId) => {
+    setAudioOutputId(deviceId);
+    const elements = [...document.querySelectorAll(".call-screen audio, .call-screen video")];
+    for (const element of elements) {
+      if (typeof element.setSinkId === "function") {
+        try {
+          await element.setSinkId(deviceId);
+        } catch (error) {
+          toast.error(error.message || "Unable to switch audio output.");
+          return;
+        }
+      }
+    }
+  };
 
   const removePeer = useCallback((peerId) => {
     peersRef.current.get(peerId)?.close();
@@ -184,6 +278,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     tracks.forEach((track) => { track.enabled = enabled; });
     if (kind === "audio") setMuted(!enabled);
     else setCameraOff(!enabled);
+    const active = callRef.current;
+    if (active) {
+      const nextMuted = kind === "audio" ? !enabled : muted;
+      const nextCameraOff = kind === "video" ? !enabled : cameraOff;
+      socket.emit("call:media-status", { callId: active.callId, muted: nextMuted, cameraOff: nextCameraOff });
+    }
   };
 
   // front <-> back camera during a video call
@@ -307,6 +407,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         status: "calling",
         startedAt: Date.now(),
       };
+      await updateCallLog(activeCall.callId, "start", {
+        callerId: activeCall.callerId,
+        conversationId: activeCall.conversationId,
+        isGroup: activeCall.isGroup,
+        isVideo: activeCall.isVideo,
+        participants: [activeCall.callerId, ...recipients],
+      });
+      await loadCallHistory();
       callRef.current = activeCall;
       setCall(activeCall);
       socket.emit("call:invite", {
@@ -340,6 +448,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         photo: caller?.photo,
         status: "connecting",
         startedAt: Date.now(),
+        connectedAt: Date.now(),
       };
       callRef.current = activeCall;
       setCall(activeCall);
@@ -367,7 +476,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const active = callRef.current;
     if (!active) return;
     const connectedFor = active.connectedAt ? Math.floor((Date.now() - active.connectedAt) / 1000) : null;
-    if (active.isCaller && !active.connectedAt) notifyMissed(active, active.recipients);
+    loadCallHistory();
     stopCall();
     showEnded(connectedFor != null ? "Call ended" : "Call cancelled", connectedFor != null ? formatTime(connectedFor) : "", {
       name: active.isGroup || active.isCaller ? active.conversationName : active.callerName,
@@ -376,16 +485,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   };
 
   /* ---------- sounds & vibration ---------- */
-  useTone("ring", Boolean(incoming));
+  useTone("ring", Boolean(incoming), false);
   useTone("ringback", call?.status === "ringing");
   useTone("busy", Boolean(ended?.tone), false);
 
   useEffect(() => {
     if (!incoming || !navigator.vibrate) return;
     navigator.vibrate([400, 200, 400]);
-    const interval = setInterval(() => navigator.vibrate([400, 200, 400]), 2200);
+    const interval = setInterval(() => navigator.vibrate([400, 200, 400]), 2600);
+    const stopVibrating = setTimeout(() => clearInterval(interval), 5200);
     return () => {
       clearInterval(interval);
+      clearTimeout(stopVibrating);
       navigator.vibrate(0);
     };
   }, [incoming]);
@@ -419,7 +530,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   /* ---------- timer: calling / ringing / in call ---------- */
   useEffect(() => {
-    const timerStartedAt = call?.connectedAt || call?.startedAt || incoming?.startedAt;
+    const timerStartedAt = call?.connectedAt;
     if (!timerStartedAt) {
       setElapsedSeconds(0);
       return;
@@ -517,6 +628,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       if (active?.callId === callId) {
         const connectedFor = active.connectedAt ? Math.floor((Date.now() - active.connectedAt) / 1000) : null;
         if (reason === "no-answer") notifyMissed(active, active.recipients);
+        updateCallLog(callId, reason === "no-answer" ? "no-answer" : reason === "declined" ? "declined" : "ended");
+        loadCallHistory();
         stopCall(false);
         if (reason === "no-answer") showEnded("No answer", "", endInfo(active), true);
         else if (reason === "declined") showEnded("Call declined", "", endInfo(active), true);
@@ -524,6 +637,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       }
       const missedIncoming = incomingRef.current;
       if (missedIncoming?.callId === callId) {
+        updateCallLog(callId, reason === "no-answer" ? "no-answer" : "declined");
+        loadCallHistory();
         incomingRef.current = null;
         setIncoming(null);
         if (reason !== "answered-elsewhere" && reason !== "declined-elsewhere") {
@@ -553,11 +668,19 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       const connectedCall = { ...callRef.current, status: "connected", connectedAt: Date.now() };
       callRef.current = connectedCall;
       setCall(connectedCall);
+      updateCallLog(callId, "answered");
+      loadCallHistory();
+    };
+    const onMediaStatus = ({ callId, userId, muted: peerMuted, cameraOff: peerCameraOff }) => {
+      if (callRef.current?.callId !== callId || userId === currentUserIdRef.current) return;
+      setRemoteMedia((current) => ({ ...current, [userId]: { muted: peerMuted, cameraOff: peerCameraOff } }));
     };
     const onBusy = ({ callId, userId }) => {
       const active = callRef.current;
       if (active?.callId !== callId) return;
       if (userId === currentUserIdRef.current) {
+        updateCallLog(active.callId, "ended");
+        loadCallHistory();
         stopCall(false);
         showEnded("You are on another call", "", endInfo(active), true);
         return;
@@ -568,6 +691,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const onUnavailable = ({ callId, reason }) => {
       const active = callRef.current;
       if (active?.callId !== callId) return;
+      updateCallLog(callId, reason === "busy" ? "declined" : "no-answer");
+      loadCallHistory();
       stopCall(false);
       if (reason === "busy") {
         showEnded("Line busy", active.isGroup ? "Everyone is on another call" : "On another call", endInfo(active), true);
@@ -589,6 +714,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     socket.on("call:accepted", onAccepted);
     socket.on("call:busy", onBusy);
     socket.on("call:unavailable", onUnavailable);
+    socket.on("call:media-status", onMediaStatus);
     return () => {
       socket.off("call:invite", onInvite);
       socket.off("connect", onConnect);
@@ -602,8 +728,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       socket.off("call:accepted", onAccepted);
       socket.off("call:busy", onBusy);
       socket.off("call:unavailable", onUnavailable);
+      socket.off("call:media-status", onMediaStatus);
     };
-  }, [flushCandidates, makePeer, notifyMissed, personFor, removePeer, showEnded, stopCall]);
+  }, [flushCandidates, makePeer, notifyMissed, personFor, removePeer, showEnded, stopCall, loadCallHistory]);
 
   // leaving the page (sign out, closing the tab) hangs up
   useEffect(() => () => {
@@ -622,14 +749,55 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const statusText = call
     ? call.connectedAt
       ? formatTime(elapsedSeconds)
-      : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" ? "Connecting" : "Calling"}… ${formatTime(elapsedSeconds)}`
+      : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" ? "Connecting" : "Calling"}…`
     : "";
   const callName = call ? (call.isGroup || call.isCaller ? call.conversationName : call.callerName) : "";
   const incomingPerson = incoming ? personFor(incoming.callerId) : null;
   const showVideoStage = call?.isVideo && remoteEntries.length > 0;
+  const returnToCall = (entry) => {
+    setCallHistoryOpen(false);
+    if (callRef.current?.callId === entry.callId) {
+      setCallMinimized(false);
+      return;
+    }
+    if (conversation?._id === String(entry.conversationId) && !callRef.current) startCall(Boolean(entry.isVideo));
+  };
+  const visibleCallHistory = callHistory.filter((entry) => String(entry.conversationId) === String(conversation?._id));
 
   return (
     <>
+      {showButtons && (
+        <div className="relative">
+          <button
+            type="button"
+            className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248]"
+            title="Call history"
+            aria-label="Call history"
+            aria-expanded={callHistoryOpen}
+            onClick={() => setCallHistoryOpen((open) => !open)}
+          >
+            <FiClock size={19} />
+          </button>
+          {callHistoryOpen && (
+            <div className="call-history-popover" role="dialog" aria-label="Call history">
+              <div className="flex items-center justify-between border-b border-[#263248] px-3 py-2">
+                <strong className="text-sm">Recent calls</strong>
+                <button type="button" aria-label="Close call history" onClick={() => setCallHistoryOpen(false)}><FiX /></button>
+              </div>
+              {visibleCallHistory.length ? visibleCallHistory.map((entry) => (
+                <button key={entry.callId} type="button" className="call-history-entry" onClick={() => returnToCall(entry)}>
+                  <img src={getImageURL(conversation?.photo)} alt="" />
+                  <span className="min-w-0 flex-1 text-left">
+                    <span className="block truncate">{entry.isVideo ? "Video call" : "Voice call"}</span>
+                    <span className="block text-xs text-[#91a0b7]">{entry.status === "no-answer" ? "No answer" : entry.status === "declined" ? "Declined" : entry.status === "answered" || entry.status === "ended" ? formatTime(entry.durationSeconds || 0) : "Calling"}</span>
+                  </span>
+                  <span className="text-[11px] text-[#91a0b7]">{new Date(entry.startedAt).toLocaleDateString()}</span>
+                </button>
+              )) : <p className="px-4 py-6 text-center text-sm text-[#91a0b7]">No calls yet</p>}
+            </div>
+          )}
+        </div>
+      )}
       {showButtons && (
         <button
           type="button"
@@ -667,7 +835,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
             {incoming.conversationName && incoming.conversationName !== incoming.callerName && (
               <p className="call-sub">{incoming.conversationName}</p>
             )}
-            <p className="call-status">Ringing… {formatTime(elapsedSeconds)}</p>
+            <p className="call-status">Ringing…</p>
           </div>
           <div className="call-actions is-incoming">
             <div className="call-action">
@@ -687,12 +855,31 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       )}
 
       {/* ---------- active call ---------- */}
-      {call && (
+      {call && callMinimized && (
+        <div className="call-mini-bar">
+          <button type="button" onClick={() => setCallMinimized(false)}>
+            <span className="call-mini-pulse" />
+            {callName || "Call"} · {statusText}
+          </button>
+          <button type="button" className="is-end" onClick={hangUp} aria-label="End call"><FiPhoneOff /></button>
+        </div>
+      )}
+      {call && !callMinimized && (
         <div className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""}`} role="dialog" aria-modal="true" aria-label="Call">
+          <button type="button" className="call-minimize-button" onClick={() => setCallMinimized(true)} aria-label="Back to conversation" title="Back to conversation">
+            <FiArrowLeft />
+          </button>
           {showVideoStage && (
             <div className={`call-stage ${remoteEntries.length > 1 ? "is-grid" : ""}`}>
               {remoteEntries.map(([id, stream]) => (
-                <CallVideo key={id} stream={stream} label={personFor(id)?.name || (id === conversation?._id ? conversation.name : "Participant")} />
+                <CallVideo
+                  key={id}
+                  stream={stream}
+                  label={personFor(id)?.name || (id === conversation?._id ? conversation.name : "Participant")}
+                  photo={personFor(id)?.photo}
+                  muted={remoteMedia[id]?.muted}
+                  cameraOff={remoteMedia[id]?.cameraOff}
+                />
               ))}
             </div>
           )}
@@ -707,6 +894,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
             )}
             <h2 className="call-name">{callName || "Call"}</h2>
             <p className="call-status">{statusText}</p>
+            {Object.entries(remoteMedia).some(([, state]) => state.muted) && <p className="call-sub">A participant is muted.</p>}
             {call.connectedAt && remoteEntries.length === 0 && <p className="call-sub">Connecting audio…</p>}
           </div>
 
@@ -743,6 +931,26 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               </button>
               <span>End</span>
             </div>
+            <div className="call-device-selects">
+              <label>
+                <span>Microphone</span>
+                <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
+                  <option value="">Default</option>
+                  {audioDevices.filter((device) => device.kind === "audioinput").map((device, index) => (
+                    <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Speaker</span>
+                <select value={audioOutputId} onChange={(event) => changeAudioOutput(event.target.value)} disabled={!audioDevices.some((device) => device.kind === "audiooutput")}>
+                  <option value="">Default</option>
+                  {audioDevices.filter((device) => device.kind === "audiooutput").map((device, index) => (
+                    <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Speaker ${index + 1}`}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
         </div>
       )}
@@ -764,15 +972,15 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   );
 }
 
-function CallVideo({ stream, label }) {
+function CallVideo({ stream, label, photo, muted, cameraOff }) {
   const videoRef = useRef(null);
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream || null;
   }, [stream]);
   return (
-    <div className="call-tile">
-      <video ref={videoRef} autoPlay playsInline />
-      <span>{label}</span>
+    <div className={`call-tile ${cameraOff ? "is-camera-off" : ""}`}>
+      {cameraOff ? <img className="call-tile-avatar" src={getImageURL(photo)} alt="" /> : <video ref={videoRef} autoPlay playsInline />}
+      <span>{label}{muted ? " · Muted" : ""}</span>
     </div>
   );
 }

@@ -1169,6 +1169,7 @@ form:has(> .print-container),
   position: relative;
   z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: center;
   gap: clamp(14px, 6vw, 28px);
@@ -1280,6 +1281,133 @@ form:has(> .print-container),
   font-size: 12px;
 }
 
+.call-tile-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #111827;
+}
+
+.call-tile.is-camera-off {
+  display: grid;
+  place-items: center;
+  background: #111827;
+}
+
+.call-minimize-button {
+  position: absolute;
+  z-index: 4;
+  top: max(14px, env(safe-area-inset-top));
+  left: 16px;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  background: rgb(15 22 41 / 78%);
+  color: white;
+  font-size: 20px;
+}
+
+.call-mini-bar {
+  position: fixed;
+  z-index: 80;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(129 140 248 / 45%);
+  border-radius: 999px;
+  background: #111827;
+  padding: 6px 8px 6px 14px;
+  color: white;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 40%);
+}
+
+.call-mini-bar button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.call-mini-bar button.is-end {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 999px;
+  background: #ef4444;
+}
+
+.call-mini-pulse {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 4px rgb(74 222 128 / 15%);
+}
+
+.call-device-selects {
+  display: flex;
+  flex-basis: 100%;
+  justify-content: center;
+  gap: 12px;
+  color: #c7d2e3;
+}
+
+.call-device-selects label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.call-device-selects select {
+  max-width: min(42vw, 190px);
+  border: 1px solid #394761;
+  border-radius: 8px;
+  background: #111827;
+  padding: 5px 8px;
+  color: white;
+  font-size: 12px;
+}
+
+.call-history-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 90;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(70vh, 480px);
+  overflow: auto;
+  border: 1px solid #263248;
+  border-radius: 14px;
+  background: #111827;
+  color: white;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 38%);
+}
+
+.call-history-entry {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgb(38 50 72 / 65%);
+  padding: 10px 12px;
+}
+
+.call-history-entry:hover {
+  background: #1b2639;
+}
+
+.call-history-entry img {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
 .call-self-view {
   position: absolute;
   z-index: 3;
@@ -1368,6 +1496,188 @@ body.swal2-shown .swal2-actions button {
   color: #aab6ca;
   font-size: 14px;
   line-height: 1.55;
+}
+
+.confirmation-dialog textarea {
+  width: 100%;
+  min-height: 120px;
+  margin-top: 12px;
+  border: 1px solid #394761;
+  border-radius: 12px;
+  background: #0c1321;
+  padding: 10px 12px;
+  color: white;
+  resize: vertical;
+}
+
+.confirmation-delete-options {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  color: #d3dbea;
+  font-size: 14px;
+}
+
+.confirmation-delete-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-menu-root {
+  position: relative;
+}
+
+.conversation-menu-popover,
+.conversation-search-popover {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 230px;
+  overflow: hidden;
+  border: 1px solid #263248;
+  border-radius: 14px;
+  background: #111827;
+  padding: 6px;
+  color: white;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 38%);
+  animation: overlay-fade-in 150ms ease-out both;
+}
+
+.conversation-menu-popover button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 9px;
+  padding: 10px;
+  color: #e8edf7;
+  text-align: left;
+  font-size: 13px;
+}
+
+.conversation-menu-popover button:hover:not(:disabled) {
+  background: #263248;
+}
+
+.conversation-menu-popover button:disabled {
+  opacity: .55;
+}
+
+.conversation-search-popover {
+  width: min(360px, calc(100vw - 24px));
+  padding: 12px;
+}
+
+.conversation-search-popover input {
+  min-width: 0;
+  flex: 1;
+  outline: 0;
+  background: transparent;
+  color: white;
+  font-size: 13px;
+}
+
+.conversation-search-popover p {
+  margin: 8px 0 0;
+  color: #91a0b7;
+  font-size: 11px;
+}
+
+.conversation-search-results {
+  max-height: min(52vh, 360px);
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.conversation-search-results button {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  border-top: 1px solid rgb(38 50 72 / 65%);
+  padding: 9px 2px;
+  text-align: left;
+}
+
+.conversation-search-results button:hover {
+  background: #1b2639;
+}
+
+.conversation-search-results strong {
+  color: #a5b4fc;
+  font-size: 11px;
+}
+
+.conversation-search-results span {
+  overflow: hidden;
+  color: #e8edf7;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-search-results small {
+  color: #91a0b7;
+  font-size: 10px;
+}
+
+.conversation-media-dialog {
+  width: min(100%, 520px);
+  max-height: min(80vh, 680px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: white;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+}
+
+.conversation-media-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding: 16px 20px;
+}
+
+.conversation-media-dialog h2 {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.conversation-media-dialog > header button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  background: #263248;
+}
+
+.conversation-media-list {
+  max-height: calc(80vh - 68px);
+  overflow: auto;
+  padding: 8px;
+}
+
+.conversation-media-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 10px;
+  padding: 11px 12px;
+  color: #dce5f4;
+  font-size: 13px;
+}
+
+.conversation-media-item:hover {
+  background: #263248;
+}
+
+.conversation-media-item svg {
+  flex: 0 0 auto;
+  color: #a5b4fc;
 }
 
 .confirmation-close {

@@ -21,7 +21,7 @@ export async function POST(request) {
   const conversationId = String(body?.conversation_id || "");
   const isGroup = body?.is_group === 1 || body?.is_group === true;
   const action = body?.action;
-  if (!objectIdPattern.test(conversationId) || !["archive", "unarchive", "block", "unblock", "check"].includes(action)) {
+  if (!objectIdPattern.test(conversationId) || !["archive", "unarchive", "block", "unblock", "mute", "unmute", "check"].includes(action)) {
     return NextResponse.json({ success: false, message: "Invalid conversation preference." }, { status: 400 });
   }
   if (isGroup && (action === "block" || action === "unblock")) {
@@ -55,10 +55,15 @@ export async function POST(request) {
       ? { $addToSet: { blockedUsers: conversationObjectId } }
       : { $pull: { blockedUsers: conversationObjectId } };
     await userSchema.updateOne({ _id: currentUserId }, update);
+  } else if (action === "mute" || action === "unmute") {
+    const update = action === "mute"
+      ? { $addToSet: { mutedConversations: conversationObjectId } }
+      : { $pull: { mutedConversations: conversationObjectId } };
+    await userSchema.updateOne({ _id: currentUserId }, update);
   }
 
   const currentUser = await userSchema.findById(currentUserId)
-    .select("archivedConversations blockedUsers")
+    .select("archivedConversations blockedUsers mutedConversations")
     .lean();
   const partner = isGroup ? null : await userSchema.findById(conversationObjectId).select("blockedUsers").lean();
   const blockedByPartner = (partner?.blockedUsers || []).some((id) => String(id) === userId);
@@ -66,6 +71,7 @@ export async function POST(request) {
     success: true,
     archived: (currentUser?.archivedConversations || []).some((id) => String(id) === conversationId),
     blocked: (currentUser?.blockedUsers || []).some((id) => String(id) === conversationId),
+    muted: (currentUser?.mutedConversations || []).some((id) => String(id) === conversationId),
     blockedByPartner,
   });
 }
