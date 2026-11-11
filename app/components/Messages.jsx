@@ -124,6 +124,17 @@ const Messages = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [preview, deleteConfirmationOpen, reactionDetailsFor, emojiPickerFor, closePreview, clearSelection]);
 
+  useEffect(() => {
+    if (!emojiPickerFor) return;
+    const closeOnOutsidePointer = (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest(".reaction-picker-popover, .reaction-more-button")) return;
+      setEmojiPickerFor(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [emojiPickerFor]);
+
   /* ---------- delete ---------- */
   const removeMessage = async (msg) => {
     const method = msg?.sender?._id === user?._id ? "DELETE" : "PATCH"; // mine: for everyone, theirs: for me
