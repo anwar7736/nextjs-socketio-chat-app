@@ -66,6 +66,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
         item?._id === updatedContact?._id ? { ...item, nickname: result.nickname } : item
       ));
       toast.success(result.nickname ? "Nickname updated." : "Nickname removed.");
+      onClose();
     } catch (error) {
       toast.error(error.message || "Unable to save this nickname.");
     } finally {
