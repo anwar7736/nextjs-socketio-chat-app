@@ -92,10 +92,10 @@ textarea {
 }
 
 .conversation-header {
-  position: sticky;
-  top: 0;
+  position: relative;
   flex: 0 0 auto;
   z-index: 30;
+  isolation: isolate;
 }
 
 .message-scroll {
@@ -1152,6 +1152,107 @@ body.swal2-shown .swal2-actions button {
   padding: 10px 20px !important;
 }
 
+.confirmation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+  background: rgb(2 6 23 / 76%);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  animation: overlay-fade-in 160ms ease-out both;
+}
+
+.confirmation-dialog {
+  position: relative;
+  width: min(100%, 420px);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  padding: 26px 22px 20px;
+  color: var(--foreground);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+  animation: modal-pop-in 200ms cubic-bezier(.2, .9, .25, 1.05) both;
+}
+
+.confirmation-dialog h2 {
+  margin: 0 36px 10px 0;
+  color: white;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.confirmation-dialog p {
+  margin: 0;
+  color: #aab6ca;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.confirmation-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: #1c2639;
+  color: var(--muted);
+}
+
+.confirmation-close:hover {
+  background: #263248;
+  color: white;
+}
+
+.confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.confirmation-actions button {
+  min-width: 88px;
+  border: 0;
+  border-radius: 11px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.confirmation-cancel {
+  background: #263248;
+  color: #d3dbea;
+}
+
+.confirmation-cancel:hover {
+  background: #33425c;
+}
+
+.confirmation-accept {
+  background: #e11d48;
+  color: white;
+}
+
+.confirmation-accept:hover {
+  background: #f43f5e;
+}
+
+.confirmation-accept:not(.is-danger) {
+  background: #4f46e5;
+}
+
+.confirmation-accept:not(.is-danger):hover {
+  background: #6366f1;
+}
+
 /* ================= Animations ================= */
 @keyframes overlay-fade-in {
   from { opacity: 0; }
@@ -1204,7 +1305,7 @@ body.swal2-shown .swal2-actions button {
 
 @media (max-width: 760px) {
   .chat-shell {
-    padding: 0;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   }
 
   .chat-panel {

@@ -73,6 +73,7 @@ const Home = () => {
   const { messages, setMessages } = useContext(MessageContext);
   const [message, setMessage] = useState("");
   const [isConversationLoading, setIsConversationLoading] = useState(false);
+  const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [isModalOpen, setModalOpen] = useState(false);
   const [data, setData] = useState("");
@@ -89,6 +90,7 @@ const Home = () => {
   const messageInputRef = useRef(null);
   const emojiRef = useRef(null);
   const userListRequestRef = useRef(0);
+  const allowAppExitRef = useRef(false);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
     setMessage((msg) => msg + emojiObject.emoji); // picker stays open, like WhatsApp, for several emojis
@@ -113,6 +115,41 @@ const Home = () => {
     window.addEventListener("beforeunload", confirmClose);
     return () => window.removeEventListener("beforeunload", confirmClose);
   }, [authUser?._id]);
+
+  useEffect(() => {
+    if (!authUser?._id) return;
+    const addExitGuard = () => {
+      window.history.pushState(
+        { ...(window.history.state || {}), convoExitGuard: true },
+        "",
+        window.location.href
+      );
+    };
+    addExitGuard();
+
+    const handleBack = (event) => {
+      if (allowAppExitRef.current || event.state?.convoExitGuard) return;
+      setExitConfirmationOpen(true);
+      addExitGuard();
+    };
+    window.addEventListener("popstate", handleBack);
+    return () => {
+      window.removeEventListener("popstate", handleBack);
+      if (window.history.state?.convoExitGuard) {
+        const { convoExitGuard, ...state } = window.history.state;
+        window.history.replaceState(state, "", window.location.href);
+      }
+    };
+  }, [authUser?._id]);
+
+  useEffect(() => {
+    if (!exitConfirmationOpen) return;
+    const dismissOnEscape = (event) => {
+      if (event.key === "Escape") setExitConfirmationOpen(false);
+    };
+    window.addEventListener("keydown", dismissOnEscape);
+    return () => window.removeEventListener("keydown", dismissOnEscape);
+  }, [exitConfirmationOpen]);
 
   const getUserList = useCallback(async () => {
     if (!authUser?._id) {
@@ -166,7 +203,7 @@ const Home = () => {
         if (!Array.isArray(conversationMessages)) throw new Error("Unable to load messages.");
         if (cancelled) return;
         setMessages(conversationMessages);
-        window.history.replaceState(null, "", "/");
+        window.history.replaceState(window.history.state, "", "/");
       } catch (error) {
         if (!cancelled) {
           console.error("Unable to open the notification conversation:", error);
@@ -751,6 +788,46 @@ const Home = () => {
         onClose={() => setModalOpen(false)}
         data={data}
       />
+      {exitConfirmationOpen && (
+        <div
+          className="confirmation-overlay"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setExitConfirmationOpen(false);
+          }}
+        >
+          <section
+            className="confirmation-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="app-exit-title"
+            aria-describedby="app-exit-description"
+          >
+            <h2 id="app-exit-title">Do you want to close this app?</h2>
+            <p id="app-exit-description">You can return to your conversations whenever you want.</p>
+            <div className="confirmation-actions">
+              <button
+                type="button"
+                className="confirmation-cancel"
+                onClick={() => setExitConfirmationOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="confirmation-accept"
+                onClick={() => {
+                  setExitConfirmationOpen(false);
+                  allowAppExitRef.current = true;
+                  window.history.go(-2);
+                }}
+              >
+                Close app
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,6 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FiArrowLeft, FiChevronDown, FiCornerUpLeft, FiTrash2, FiX } from "react-icons/fi";
-import Swal from "sweetalert2";
 import { dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
 import { AuthContext } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
@@ -23,6 +22,7 @@ const Messages = () => {
   const [swipe, setSwipe] = useState({ id: null, dx: 0 });
   const [preview, setPreview] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const selecting = selectedIds.length > 0;
 
   // Stay at the newest message: on new messages, and while photos/videos above it finish loading
@@ -108,17 +108,33 @@ const Messages = () => {
   useEffect(() => {
     const onKey = (event) => {
       if (event.key !== "Escape") return;
-      if (preview) closePreview();
+      if (deleteConfirmationOpen) setDeleteConfirmationOpen(false);
+      else if (preview) closePreview();
       else clearSelection();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [preview, closePreview, clearSelection]);
+  }, [preview, deleteConfirmationOpen, closePreview, clearSelection]);
 
   /* ---------- delete ---------- */
   const removeMessage = async (msg) => {
     const method = msg?.sender?._id === user?._id ? "DELETE" : "PATCH"; // mine: for everyone, theirs: for me
-    const response = await fetch(`/api/messages/${msg?._id}`, { method });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    let response;
+    try {
+      response = await fetch(`/api/messages/${msg?._id}`, {
+        method,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("The delete request timed out. Please try again.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.success) {
       throw new Error(result.message || "Unable to remove this message.");
@@ -141,28 +157,19 @@ const Messages = () => {
     }
   };
 
-  const deleteSelected = async () => {
+  const openDeleteConfirmation = () => {
+    if (selectedIds.length && !deleting) setDeleteConfirmationOpen(true);
+  };
+
+  const confirmDeleteSelected = async () => {
     const selected = (messages || []).filter((msg) => selectedIds.includes(msg?._id));
     if (!selected.length || deleting) return;
-    const mineCount = selected.filter((msg) => msg?.sender?._id === user?._id).length;
-    const theirsCount = selected.length - mineCount;
-    const lines = [];
-    if (mineCount) lines.push(`${mineCount} of your message${mineCount > 1 ? "s" : ""} will be deleted for everyone.`);
-    if (theirsCount) lines.push(`${theirsCount} received message${theirsCount > 1 ? "s" : ""} will be removed for you.`);
-    const answer = await Swal.fire({
-      title: `Delete ${selected.length} message${selected.length > 1 ? "s" : ""}?`,
-      text: lines.join(" "),
-      showCancelButton: true,
-      confirmButtonText: "Delete",
-      confirmButtonColor: "#e11d48",
-      cancelButtonColor: "#334155",
-      reverseButtons: true,
-    });
-    if (!answer.isConfirmed) return;
-
+    setDeleteConfirmationOpen(false);
     setDeleting(true);
     try {
-      for (const msg of selected) await removeMessage(msg);
+      const results = await Promise.allSettled(selected.map((msg) => removeMessage(msg)));
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
       clearSelection();
     } catch (error) {
       toast.error(error.message || "Unable to remove a selected message.");
@@ -287,6 +294,8 @@ const Messages = () => {
   if (!socket) return null;
 
   const selectedMessages = (messages || []).filter((msg) => selectedIds.includes(msg?._id));
+  const ownSelectedCount = selectedMessages.filter((msg) => msg?.sender?._id === user?._id).length;
+  const receivedSelectedCount = selectedMessages.length - ownSelectedCount;
 
   return (
     <>
@@ -306,7 +315,7 @@ const Messages = () => {
             <button
               type="button"
               className="selection-icon-button is-danger"
-              onClick={deleteSelected}
+              onClick={openDeleteConfirmation}
               disabled={deleting}
               aria-label={`Delete ${selectedIds.length} selected`}
               title="Delete"
@@ -314,6 +323,50 @@ const Messages = () => {
               <FiTrash2 />
             </button>
           </div>
+        </div>
+      )}
+      {deleteConfirmationOpen && (
+        <div
+          className="confirmation-overlay"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setDeleteConfirmationOpen(false);
+          }}
+        >
+          <section
+            className="confirmation-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirmation-title"
+            aria-describedby="delete-confirmation-description"
+          >
+            <button
+              type="button"
+              className="confirmation-close"
+              onClick={() => setDeleteConfirmationOpen(false)}
+              aria-label="Close delete confirmation"
+            >
+              <FiX />
+            </button>
+            <h2 id="delete-confirmation-title">
+              Delete {selectedIds.length} message{selectedIds.length > 1 ? "s" : ""}?
+            </h2>
+            <p id="delete-confirmation-description">
+              {ownSelectedCount > 0 &&
+                `${ownSelectedCount} of your message${ownSelectedCount > 1 ? "s" : ""} will be deleted for everyone.`}
+              {ownSelectedCount > 0 && receivedSelectedCount > 0 && " "}
+              {receivedSelectedCount > 0 &&
+                `${receivedSelectedCount} received message${receivedSelectedCount > 1 ? "s" : ""} will be removed for you.`}
+            </p>
+            <div className="confirmation-actions">
+              <button type="button" className="confirmation-cancel" onClick={() => setDeleteConfirmationOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="confirmation-accept is-danger" onClick={confirmDeleteSelected}>
+                Delete
+              </button>
+            </div>
+          </section>
         </div>
       )}
       <div className="message-scroll" id="root" ref={elementRef}>
