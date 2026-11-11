@@ -43,12 +43,53 @@ function makeToneUrl(segments, sampleRate = 16000) {
   return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
 }
 
+// A marimba-style ringtone in the spirit of the iPhone's (an original melody, not Apple's recording):
+// each note is a struck wooden bar — a fast attack, a ringing fundamental and short-lived bright overtones.
+function makeMarimbaUrl(notes, totalSeconds, sampleRate = 22050) {
+  const total = Math.round(totalSeconds * sampleRate);
+  const mix = new Float32Array(total);
+  const nyquist = sampleRate / 2;
+  for (const [freq, start] of notes) {
+    const from = Math.round(start * sampleRate);
+    const length = Math.min(total - from, Math.round(0.9 * sampleRate));
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sampleRate;
+      const attack = 1 - Math.exp(-t / 0.003);
+      let value = Math.sin(2 * Math.PI * freq * t) * Math.exp(-t / 0.28);
+      if (freq * 4 < nyquist * 0.9) value += 0.35 * Math.sin(2 * Math.PI * freq * 4 * t) * Math.exp(-t / 0.06);
+      if (freq * 9.9 < nyquist * 0.9) value += 0.12 * Math.sin(2 * Math.PI * freq * 9.9 * t) * Math.exp(-t / 0.02);
+      mix[from + i] += value * attack;
+    }
+  }
+  let peak = 0;
+  for (const sample of mix) peak = Math.max(peak, Math.abs(sample));
+  const gain = peak ? 0.8 / peak : 0;
+  const buffer = new ArrayBuffer(44 + total * 2);
+  const view = new DataView(buffer);
+  const write = (offset, text) => [...text].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
+  write(0, "RIFF"); view.setUint32(4, 36 + total * 2, true); write(8, "WAVE"); write(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, "data"); view.setUint32(40, total * 2, true);
+  mix.forEach((sample, i) => view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, sample * gain)) * 32767, true));
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+}
+
+// rising and falling arpeggios (E major, then F# minor), played twice, then a short pause — about 4.4 s per loop
+function marimbaRing() {
+  const E5 = 659.26, Gs5 = 830.61, B5 = 987.77, E6 = 1318.51, Fs5 = 739.99, A5 = 880, Cs6 = 1108.73, Fs6 = 1479.98;
+  const phrase = [E5, Gs5, B5, E6, B5, Gs5, Fs5, A5, Cs6, Fs6, Cs6, A5];
+  const step = 0.14;
+  const notes = [...phrase, ...phrase].map((freq, i) => [freq, i * step]);
+  return makeMarimbaUrl(notes, phrase.length * 2 * step + 1.05);
+}
+
 let tones = null;
 function getTones() {
   if (!tones && typeof window !== "undefined") {
     tones = {
-      // incoming: a bright two-note phrase, repeated
-      ring: makeToneUrl([[[784], 0.18], [[], 0.06], [[988], 0.18], [[], 0.06], [[784], 0.18], [[], 0.06], [[988], 0.3], [[], 1.4]]),
+      // incoming: marimba ringtone, looped while the call rings
+      ring: marimbaRing(),
       // outgoing ringback, the classic "tuuut … tuuut"
       ringback: makeToneUrl([[[440, 480], 1.2], [[], 2.4]]),
       // busy / ended: three short beeps
@@ -485,7 +526,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   };
 
   /* ---------- sounds & vibration ---------- */
-  useTone("ring", Boolean(incoming), false);
+  useTone("ring", Boolean(incoming)); // loops for as long as the call rings (45 s at most, set by the socket server)
   useTone("ringback", call?.status === "ringing");
   useTone("busy", Boolean(ended?.tone), false);
 
