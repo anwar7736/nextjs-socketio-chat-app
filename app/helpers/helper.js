@@ -78,7 +78,7 @@ export const dateTimeFormat = (date) => {
 
 export const activityFormat = (date, now = Date.now()) => {
   const timestamp = date ? new Date(date).getTime() : NaN;
-  if (!Number.isFinite(timestamp)) return "Activity unknown";
+  if (!Number.isFinite(timestamp)) return "";
   const minutes = Math.max(0, Math.floor((now - timestamp) / 60000));
   if (minutes < 1) return "Active just now";
   if (minutes === 1) return "Active a minute ago";
