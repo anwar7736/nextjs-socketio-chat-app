@@ -101,6 +101,16 @@ const Home = () => {
     return () => document.removeEventListener("pointerdown", close);
   }, [showPicker]);
 
+  useEffect(() => {
+    if (!authUser?._id) return;
+    const confirmClose = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", confirmClose);
+    return () => window.removeEventListener("beforeunload", confirmClose);
+  }, [authUser?._id]);
+
   const getUserList = useCallback(async () => {
     let res = await fetch(
       `/api/users?auth_id=${authUser._id}&search=${search}`
@@ -518,7 +528,7 @@ const Home = () => {
           activeUsers={activeUsers}
         />
         <main className={`chat-main ${!user ? "is-hidden-mobile" : ""}`}>
-          <header className="flex items-center justify-between border-b border-[#263248] bg-[#111827]/95 px-4 py-3 text-white sm:px-6">
+          <header className="sticky top-0 z-30 flex shrink-0 items-center justify-between border-b border-[#263248] bg-[#111827]/95 px-4 py-3 text-white sm:px-6">
             {user ? (
               <div
                 className="flex min-w-0 cursor-pointer items-center gap-3"
@@ -595,7 +605,7 @@ const Home = () => {
             </div>
           )}
           {user && (
-            <div>
+            <div className="shrink-0">
               <form method="POST" onSubmit={sendMessage}>
                 <footer className="message-composer">
                   {attachment && (

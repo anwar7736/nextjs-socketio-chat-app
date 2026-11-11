@@ -79,6 +79,7 @@ textarea {
 .chat-main {
   position: relative;
   display: flex;
+  min-height: 0;
   min-width: 0;
   flex: 1;
   flex-direction: column;
@@ -88,15 +89,14 @@ textarea {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 24px clamp(16px, 5vw, 72px) 140px;
+  padding: 24px clamp(16px, 5vw, 72px);
   scrollbar-color: #394761 transparent;
 }
 
 .message-composer {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
   padding: 18px clamp(16px, 5vw, 72px) 22px;
   background: linear-gradient(transparent, #111827 24%);
 }
@@ -140,6 +140,20 @@ textarea {
   border-radius: 14px;
   background: var(--surface-raised);
   box-shadow: 0 14px 40px rgb(0 0 0 / 30%);
+  transform-origin: top right;
+  animation: dropdown-fade-in 160ms ease-out both;
+}
+
+@keyframes dropdown-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* ================= Modals (profile, add/edit group, conversation info) =================
@@ -1111,12 +1125,13 @@ body.swal2-shown .swal2-actions button {
   }
 
   .message-scroll {
-    padding: 18px 14px 130px;
+    padding: 18px 14px;
   }
 
   /* one tight row: [📎] [ message box ……… ] [🙂] [🎤/➤] */
   .message-composer {
     padding: 6px 6px max(8px, env(safe-area-inset-bottom));
+    background: linear-gradient(transparent, #111827 12%);
   }
 
   .composer-controls {

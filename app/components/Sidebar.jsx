@@ -20,9 +20,10 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
   const { user, setUser } = useContext(AuthContext);
   const [isProfileModalOpen, setProfileModalOpen] = useState(false);
   const [isAddGroupModalOpen, setAddGroupModalOpen] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
 
   const toggleDropdown = () => {
-    setIsDropdownOpen(!isDropdownOpen);
+    setIsDropdownOpen((open) => !open);
   };
 
   const logout = async () => {
@@ -79,6 +80,7 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success) throw new Error(result.message || "Unable to enable notifications.");
+      setPushEnabled(true);
       setShowPushBanner(false);
       if (!silent) toast.success("Message notifications are enabled.");
     } catch (error) {
@@ -87,14 +89,62 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
     }
   };
 
+  const disableNotifications = async () => {
+    setIsDropdownOpen(false);
+    if (!pushSupported()) {
+      toast.error("This browser does not support push notifications.");
+      return;
+    }
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        setPushEnabled(false);
+        toast.success("Message notifications are disabled on this device.");
+        return;
+      }
+
+      const response = await fetch("/api/push-subscription", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to disable notifications.");
+      }
+
+      setPushEnabled(false);
+      const unsubscribed = await subscription.unsubscribe();
+      if (!unsubscribed) {
+        throw new Error("The browser could not unsubscribe this device.");
+      }
+      toast.success("Message notifications are disabled on this device.");
+    } catch (error) {
+      toast.error(error.message || "Unable to disable notifications.");
+    }
+  };
+
   useEffect(() => {
     if (!user?._id || !pushSupported()) return;
     if (Notification.permission === "granted") {
-      enableNotifications({ silent: true });
+      navigator.serviceWorker.ready
+        .then((registration) => registration.pushManager.getSubscription())
+        .then((subscription) => {
+          setPushEnabled(Boolean(subscription));
+          if (subscription) enableNotifications({ silent: true });
+        })
+        .catch((error) => {
+          console.error("Unable to check push notification status:", error);
+        });
     } else if (Notification.permission === "default") {
+      setPushEnabled(false);
       let dismissed = false;
       try { dismissed = window.localStorage.getItem("push-banner-dismissed") === "1"; } catch {}
       setShowPushBanner(!dismissed);
+    } else {
+      setPushEnabled(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?._id]);
@@ -130,7 +180,7 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
   }, []);
   return (
     <aside className={`chat-sidebar flex h-full flex-col ${className}`}>
-      <header className="flex items-center justify-between border-b border-[#263248] px-4 py-4">
+      <header ref={sectionRef} className="relative flex items-center justify-between border-b border-[#263248] px-4 py-4">
         <div className="flex min-w-0 cursor-pointer items-center gap-3">
           <img
             src={getImageURL(user?.photo)}
@@ -148,14 +198,18 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
               role="button"
               aria-label="Account menu"
               tabIndex={0}
-              onMouseOver={(e) => setIsDropdownOpen(true)}
               onClick={toggleDropdown}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  toggleDropdown();
+                }
+              }}
             />
           </div>
         </div>
         {isDropdownOpen ? (
           <div
-            ref={sectionRef}
             className="dropdown-list right-4 top-16"
           >
             <ul
@@ -164,11 +218,11 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
             >
               <li>
                 <button
-                  onClick={() => enableNotifications()}
+                  onClick={pushEnabled ? disableNotifications : () => enableNotifications()}
                   className="flex w-full items-center px-4 py-3 text-left hover:bg-[#263248]"
                 >
                   <IoNotificationsOutline className="mr-2 text-indigo-300" />
-                  Enable notifications
+                  {pushEnabled ? "Disable notifications" : "Enable notifications"}
                 </button>
               </li>
               <li>
