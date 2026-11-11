@@ -7,7 +7,7 @@ import { MessageContext } from "../contexts/MessageContext";
 import { activityFormat, getImageURL, loadMessages } from "../helpers/helper";
 import { UserListContext } from "../contexts/UserListContext";
 
-const Users = ({ activeUsers, isLoading, setConversationLoading }) => {
+const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) => {
   const { user, setUser } = useContext(UserContext);
   const { users, setUsers } = useContext(UserListContext);
   const { setMessages } = useContext(MessageContext);
@@ -134,7 +134,7 @@ const Users = ({ activeUsers, isLoading, setConversationLoading }) => {
         </div>
       ) : (
         visibleUsers.length > 0 ? visibleUsers.map((contact) => {
-          const isActive = activeUsers.includes(contact?._id);
+          const isActive = activeUsers.includes(String(contact?._id));
           const mine = contact?.last_message_sender_id === user?._id;
           const preview = contact?.last_message || (
             contact?.last_message_type === "image" ? "📷 Photo"
@@ -179,7 +179,7 @@ const Users = ({ activeUsers, isLoading, setConversationLoading }) => {
                   )}
                   {contact?.is_group !== 1 && (
                     <p className="mt-1 truncate text-xs text-[#91a0b7]">
-                      {isActive ? "Active now" : activityFormat(contact?.lastSeenAt)}
+                      {isActive ? "Active now" : activityFormat(contact?.lastSeenAt, activityNow)}
                     </p>
                   )}
                   {(contact?.blocked || contact?.blockedByPartner) && (

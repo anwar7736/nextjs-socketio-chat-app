@@ -17,6 +17,7 @@ const Sidebar = ({
   search,
   setSearch,
   activeUsers,
+  activityNow,
   isUserListLoading,
   setConversationLoading,
   className = "",
@@ -297,6 +298,7 @@ const Sidebar = ({
         </div>
         <Users
           activeUsers={activeUsers}
+          activityNow={activityNow}
           isLoading={isUserListLoading}
           setConversationLoading={setConversationLoading}
         />

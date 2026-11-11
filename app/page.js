@@ -175,7 +175,7 @@ const Home = () => {
     };
     updatePresence();
     const interval = setInterval(updatePresence, 60_000);
-    const activityInterval = setInterval(() => setActivityNow(Date.now()), 60_000);
+    const activityInterval = setInterval(() => setActivityNow(Date.now()), 15_000);
     const onPageHide = () => updatePresence();
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") updatePresence();
@@ -307,6 +307,19 @@ const Home = () => {
       if (requestId === userListRequestRef.current) setIsUserListLoading(false);
     }
   }, [authUser?._id, search, setUsers]);
+
+  useEffect(() => {
+    if (!user?._id || user?.is_group === 1) return;
+    const matchingContact = (users || []).find((item) =>
+      item?._id === user._id && item?.is_group !== 1
+    );
+    if (!matchingContact || matchingContact.lastSeenAt === user.lastSeenAt) return;
+    setUser((current) =>
+      current?._id === user._id && current?.is_group !== 1
+        ? { ...current, lastSeenAt: matchingContact.lastSeenAt }
+        : current
+    );
+  }, [users, user, setUser]);
 
   useEffect(() => {
     getUserList();
@@ -522,7 +535,7 @@ const Home = () => {
   const loadActiveUsers = () => {
     socket.off("active-users");
     socket.on("active-users", (data) => {
-      setActiveUsers(data);
+      setActiveUsers(Array.isArray(data) ? data.map(String) : []);
     });
 
     socket.off("user-offline");
@@ -530,10 +543,10 @@ const Home = () => {
       const lastSeenAt = data?.last_seen_at;
       if (!data?.user_id || !lastSeenAt) return;
       setUsers((current) => current.map((item) =>
-        item?._id === data.user_id ? { ...item, lastSeenAt } : item
+        String(item?._id) === String(data.user_id) ? { ...item, lastSeenAt } : item
       ));
       setUser((current) =>
-        current?._id === data.user_id ? { ...current, lastSeenAt } : current
+        String(current?._id) === String(data.user_id) ? { ...current, lastSeenAt } : current
       );
     });
 
@@ -806,6 +819,7 @@ const Home = () => {
           setSearch={setSearch}
           search={search}
           activeUsers={activeUsers}
+          activityNow={activityNow}
           isUserListLoading={isUserListLoading}
           setConversationLoading={setIsConversationLoading}
         />
@@ -845,12 +859,12 @@ const Home = () => {
                         : `${user?.total_members || 0} members`
                       : typingUsers.length
                         ? "Typing…"
-                        : activeUsers.includes(user?._id)
+                        : activeUsers.includes(String(user?._id))
                           ? "Active now"
                           : activityFormat(user?.lastSeenAt, activityNow)}
                   </span>
                 </span>
-                {activeUsers.includes(user?._id) && (
+                {activeUsers.includes(String(user?._id)) && (
                   <span className="h-2 w-2 rounded-full bg-emerald-400" aria-label="Online" />
                 )}
               </div>
