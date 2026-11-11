@@ -808,7 +808,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   return (
     <>
       {showButtons && (
-        <div className="relative">
+        <div className="relative hidden">
           <button
             type="button"
             className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248]"
