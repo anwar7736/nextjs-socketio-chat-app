@@ -71,7 +71,7 @@ function useTone(kind, playing, loop = true) {
   }, [kind, playing, loop]);
 }
 
-export default function CallControls({ conversation, currentUser, showButtons = true }) {
+export default function CallControls({ conversation, currentUser, showButtons = true, blocked = false }) {
   const { users } = useContext(UserListContext) || {};
   const [incoming, setIncoming] = useState(null);
   const [call, setCall] = useState(null);
@@ -80,6 +80,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [busy, setBusy] = useState(false);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const localStreamRef = useRef(null);
+  const incomingRef = useRef(null);
   const peersRef = useRef(new Map());
   const pendingCandidatesRef = useRef(new Map());
   const callRef = useRef(null);
@@ -253,12 +254,30 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const startCall = async (video) => {
     if (!conversation?._id || !currentUser?._id || busy || callRef.current) return;
+    if (blocked) {
+      toast.error("Unblock this contact before calling.");
+      return;
+    }
     if (!socket.connected) {
       toast.error("Not connected. Check your internet connection and try again.");
       return;
     }
     setBusy(true);
     try {
+      const accessResponse = await fetch("/api/conversations/access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: conversation._id,
+          peer_id: conversation._id,
+          is_group: conversation.is_group === 1,
+        }),
+      });
+      const accessResult = await accessResponse.json().catch(() => ({}));
+      if (!accessResponse.ok || !accessResult.success || !accessResult.allowed) {
+        throw new Error(accessResult.message || "This conversation cannot receive calls.");
+      }
+
       let recipients;
       if (conversation.is_group === 1) {
         const response = await fetch(`/api/group?id=${conversation._id}`);
@@ -295,6 +314,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         isVideo: activeCall.isVideo,
         callerName: activeCall.callerName,
         conversationName: activeCall.conversationName,
+        conversationId: activeCall.conversationId,
+        isGroup: activeCall.isGroup,
         recipients,
       });
     } catch (error) {
@@ -322,11 +343,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       };
       callRef.current = activeCall;
       setCall(activeCall);
+      incomingRef.current = null;
       setIncoming(null);
       socket.emit("call:accept", { callId: incoming.callId, callerId: incoming.callerId });
     } catch (error) {
       toast.error(error.message || "Unable to join the call.");
       socket.emit("call:reject", { callId: incoming.callId, callerId: incoming.callerId });
+      incomingRef.current = null;
       setIncoming(null);
     } finally {
       setBusy(false);
@@ -336,6 +359,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const declineCall = () => {
     if (!incoming) return;
     socket.emit("call:reject", { callId: incoming.callId, callerId: incoming.callerId });
+    incomingRef.current = null;
     setIncoming(null);
   };
 
@@ -378,6 +402,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           ? `${incoming.callerName} @ ${incoming.conversationName}`
           : incoming.callerName,
         icon: "/icons/icon.svg",
+        silent: false,
         tag,
         requireInteraction: true,
         vibrate: [400, 200, 400, 200, 400],
@@ -409,12 +434,34 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   useEffect(() => {
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
-    const onInvite = (invite) => {
+    const onInvite = async (invite) => {
       if (callRef.current) {
         socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
         return;
       }
-      setIncoming({ ...invite, startedAt: Date.now() });
+      try {
+        const response = await fetch("/api/conversations/access", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: invite.conversationId,
+            peer_id: invite.callerId,
+            is_group: invite.isGroup,
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.success || !result.allowed || callRef.current) {
+          socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
+          return;
+        }
+      } catch (error) {
+        console.error("Unable to verify incoming call access:", error);
+        socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
+        return;
+      }
+      const incomingCall = { ...invite, startedAt: Date.now() };
+      incomingRef.current = incomingCall;
+      setIncoming(incomingCall);
     };
     const onParticipant = async ({ callId, userId }) => {
       const active = callRef.current;
@@ -475,12 +522,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         else if (reason === "declined") showEnded("Call declined", "", endInfo(active), true);
         else showEnded("Call ended", connectedFor != null ? formatTime(connectedFor) : "", endInfo(active));
       }
-      setIncoming((current) => {
-        if (current?.callId === callId && reason !== "answered-elsewhere" && reason !== "declined-elsewhere") {
-          toast.info(`Missed call from ${current.callerName || "someone"}.`);
+      const missedIncoming = incomingRef.current;
+      if (missedIncoming?.callId === callId) {
+        incomingRef.current = null;
+        setIncoming(null);
+        if (reason !== "answered-elsewhere" && reason !== "declined-elsewhere") {
+          toast.info(`Missed call from ${missedIncoming.callerName || "someone"}.`);
+          showEnded("Missed call", "", {
+            name: missedIncoming.callerName || "Someone",
+            photo: personFor(missedIncoming.callerId)?.photo,
+          }, true);
         }
-        return current?.callId === callId ? null : current;
-      });
+      }
     };
     const onLeft = ({ callId, userId }) => {
       if (callRef.current?.callId === callId) removePeer(userId);
@@ -583,7 +636,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
           title={socketConnected ? "Voice call" : "Connecting…"}
           aria-label="Start voice call"
-          disabled={busy || Boolean(call)}
+          disabled={busy || Boolean(call) || blocked}
           onClick={() => startCall(false)}
         >
           <MdAddIcCall size={20} />
@@ -595,7 +648,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
           title={socketConnected ? "Video call" : "Connecting…"}
           aria-label="Start video call"
-          disabled={busy || Boolean(call)}
+          disabled={busy || Boolean(call) || blocked}
           onClick={() => startCall(true)}
         >
           <FaVideo size={18} />

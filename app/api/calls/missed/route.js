@@ -5,6 +5,7 @@ import { getSessionUserId } from "@/app/lib/session";
 import { sendPushNotification } from "@/app/lib/pushNotifications";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { groupSchema } from "@/app/models/groupModel";
+import { messageLogSchema } from "@/app/models/messageLogModel";
 import { userSchema } from "@/app/models/userModel";
 
 const objectIdPattern = /^[a-f\d]{24}$/i;
@@ -46,17 +47,32 @@ export async function POST(request) {
   } else {
     // a direct call can only be missed by the person on the other side of that chat
     recipients = requested.length === 1 && requested[0] === conversationId && conversationId !== userId ? [conversationId] : [];
+    if (recipients.length) {
+      const [caller, recipient] = await Promise.all([
+        userSchema.findById(userId).select("blockedUsers").lean(),
+        userSchema.findById(conversationId).select("blockedUsers").lean(),
+      ]);
+      const blocked = (caller?.blockedUsers || []).some((id) => String(id) === conversationId) ||
+        (recipient?.blockedUsers || []).some((id) => String(id) === userId);
+      if (blocked) recipients = [];
+    }
   }
   if (!recipients.length) return NextResponse.json({ success: false, message: "Nobody to notify." }, { status: 400 });
 
   const caller = await userSchema.findById(userId).select("name").lean();
   const ticketId = isGroup ? conversationId : userId;
-  await sendPushNotification(recipients, {
+  const pendingCounts = await messageLogSchema.aggregate([
+    { $match: { receiver_id: { $in: recipients.map((id) => new mongoose.Types.ObjectId(id)) }, status: 0 } },
+    { $group: { _id: "$receiver_id", count: { $sum: 1 } } },
+  ]);
+  const unreadByUser = new Map(pendingCounts.map((item) => [String(item._id), item.count]));
+  await sendPushNotification(recipients, (recipientId) => ({
     title: `Missed ${isVideo ? "video" : "voice"} call`,
     body: groupName ? `${caller?.name || "Someone"} @ ${groupName}` : caller?.name || "Someone called you",
     url: `/?ticket=${ticketId}&is_group=${isGroup ? "1" : "0"}`,
     tag: `call-${ticketId}`,
-  }).catch((error) => console.error("Unable to send a missed-call notification:", error));
+    badge: unreadByUser.get(recipientId) || 0,
+  })).catch((error) => console.error("Unable to send a missed-call notification:", error));
 
   return NextResponse.json({ success: true });
 }

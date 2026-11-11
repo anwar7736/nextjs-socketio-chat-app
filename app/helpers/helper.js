@@ -93,6 +93,45 @@ export const activityFormat = (date, now = Date.now()) => {
   return years === 1 ? "Active a year ago" : `Active ${years} years ago`;
 };
 
+export const playMessageReminder = () => {
+  if (typeof window === "undefined") return;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+
+  try {
+    const context = new AudioContext();
+    const play = () => {
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.connect(context.destination);
+      const notes = [{ frequency: 880, start: 0 }, { frequency: 660, start: 0.14 }];
+      for (const note of notes) {
+        const oscillator = context.createOscillator();
+        oscillator.type = "sine";
+        oscillator.frequency.value = note.frequency;
+        oscillator.connect(gain);
+        const start = context.currentTime + note.start;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.12, start + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+        oscillator.start(start);
+        oscillator.stop(start + 0.13);
+      }
+      window.setTimeout(() => context.close().catch(() => {}), 400);
+    };
+    if (context.state === "suspended") {
+      context.resume().then(play).catch((error) => {
+        console.warn("Unable to play the message reminder sound:", error);
+        context.close().catch(() => {});
+      });
+    } else {
+      play();
+    }
+  } catch (error) {
+    console.warn("Unable to play the message reminder sound:", error);
+  }
+};
+
 let socketInstance;
 
 export const socket_connection = () => {

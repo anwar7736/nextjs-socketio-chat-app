@@ -17,6 +17,7 @@ import {
   auth,
   getImageURL,
   loadMessages,
+  playMessageReminder,
   socket_connection,
 } from "./helpers/helper";
 let socket = socket_connection();
@@ -268,13 +269,13 @@ const Home = () => {
     return () => window.removeEventListener("keydown", dismissOnEscape);
   }, [exitConfirmationOpen]);
 
-  const getUserList = useCallback(async () => {
+  const getUserList = useCallback(async ({ showLoading = true } = {}) => {
     if (!authUser?._id) {
       setIsUserListLoading(false);
       return;
     }
     const requestId = ++userListRequestRef.current;
-    setIsUserListLoading(true);
+    if (showLoading) setIsUserListLoading(true);
     try {
       const response = await fetch(
         `/api/users?auth_id=${authUser._id}&search=${encodeURIComponent(search)}`
@@ -296,6 +297,16 @@ const Home = () => {
   useEffect(() => {
     getUserList();
   }, [getUserList]);
+
+  const unreadTotal = (Array.isArray(users) ? users : [])
+    .reduce((total, item) => total + Math.max(0, Number(item?.pending) || 0), 0);
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    const updateBadge = unreadTotal > 0
+      ? navigator.setAppBadge?.(unreadTotal)
+      : navigator.clearAppBadge?.();
+    updateBadge?.catch((error) => console.warn("Unable to update the app unread badge:", error));
+  }, [unreadTotal]);
 
   useEffect(() => {
     if (!authUser?._id) return;
@@ -406,6 +417,7 @@ const Home = () => {
         if (messageInputRef.current) messageInputRef.current.style.height = "auto";
         // the socket server does not echo an event back to the tab that sent it
         setMessages(await loadMessages(user));
+        getUserList({ showLoading: false });
       } else {
         setMessageError(res.message || "Unable to send message.");
       }
@@ -464,6 +476,9 @@ const Home = () => {
   const loadRealTimeMessages = () => {
     socket.off("private-message");
     socket.on("private-message", async (data) => {
+      if (data?.sender_id !== authUser?._id && document.visibilityState === "visible") {
+        playMessageReminder();
+      }
       if (
         (data?.is_group == 1 && user?._id == data?.receiver_id) ||
         (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
@@ -471,17 +486,13 @@ const Home = () => {
       ) {
         let res = await loadMessages(user);
         setMessages(res);
-      } else if (data?.receiver_id == authUser?._id || data?.is_group == 1) {
-        let userList = [...users];
-        let index = userList.findIndex(
-          (user) =>
-            (user?._id == data.sender_id || user?._id == data.receiver_id) &&
-            user?.is_group == data?.is_group
-        );
-        if (index >= 0) {
-          userList[index].pending++;
-          setUsers(userList);
-        }
+        getUserList({ showLoading: false });
+      } else if (
+        data?.receiver_id == authUser?._id ||
+        data?.sender_id == authUser?._id ||
+        data?.is_group == 1
+      ) {
+        getUserList({ showLoading: false });
       }
     });
   };
@@ -815,7 +826,12 @@ const Home = () => {
               <div className="font-semibold tracking-wide text-white">Convo</div>
             )}
             <div className="flex items-center gap-1">
-              <CallControls conversation={user} currentUser={authUser} showButtons={Boolean(user)} />
+              <CallControls
+                conversation={user}
+                currentUser={authUser}
+                showButtons={Boolean(user)}
+                blocked={Boolean(user?.blocked || user?.blockedByPartner)}
+              />
               {user && (
                 <button
                   type="button"
@@ -853,6 +869,11 @@ const Home = () => {
           )}
           {user && (
             <div className="shrink-0">
+              {user?.blocked || user?.blockedByPartner ? (
+                <div className="m-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                  {user?.blocked ? "You blocked this contact. Unblock them from the conversation menu to send messages or call." : "This contact has blocked you."}
+                </div>
+              ) : (
               <form method="POST" onSubmit={sendMessage}>
                 <footer className="message-composer">
                   {attachment && (
@@ -964,6 +985,7 @@ const Home = () => {
                   <ValidationError message={messageError} />
                 </footer>
               </form>
+              )}
             </div>
           )}
         </main>

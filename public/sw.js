@@ -1,4 +1,4 @@
-const CACHE_NAME = "convo-shell-v2";
+const CACHE_NAME = "convo-shell-v3";
 const APP_SHELL = ["/auth", "/manifest.json", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -55,6 +55,18 @@ self.addEventListener("push", (event) => {
     payload = { body: event.data?.text() || "You have a new message." };
   }
   event.waitUntil((async () => {
+    const unreadCount = Number(payload.badge);
+    if (Number.isFinite(unreadCount)) {
+      try {
+        if (unreadCount > 0 && typeof self.navigator.setAppBadge === "function") {
+          await self.navigator.setAppBadge(unreadCount);
+        } else if (unreadCount === 0 && typeof self.navigator.clearAppBadge === "function") {
+          await self.navigator.clearAppBadge();
+        }
+      } catch (error) {
+        console.warn("Unable to update the app unread badge:", error);
+      }
+    }
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     // the app is open and in front: it shows the message itself
     if (windows.some((client) => client.focused && client.visibilityState === "visible")) return;
@@ -62,6 +74,7 @@ self.addEventListener("push", (event) => {
       body: payload.body || "You have a new message.",
       icon: "/icons/icon.svg",
       badge: "/icons/icon.svg",
+      silent: false,
       tag: payload.tag || "convo-message",
       renotify: true,          // a new message in the same chat buzzes again
       vibrate: [120, 60, 120],

@@ -29,9 +29,10 @@ export async function sendPushNotification(userIds, payload) {
   }
 
   const subscriptions = await pushSubscriptionSchema.find({ user_id: { $in: userIds } }).lean();
-  await Promise.all(subscriptions.map(async ({ _id, endpoint, subscription }) => {
+  await Promise.all(subscriptions.map(async ({ _id, user_id, endpoint, subscription }) => {
     try {
-      await sendNotification(subscription, JSON.stringify(payload));
+      const notification = typeof payload === "function" ? payload(String(user_id)) : payload;
+      await sendNotification(subscription, JSON.stringify(notification));
     } catch (error) {
       if (error.statusCode === 404 || error.statusCode === 410) {
         await pushSubscriptionSchema.deleteOne({ _id });

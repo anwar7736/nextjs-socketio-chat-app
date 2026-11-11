@@ -237,19 +237,33 @@ export async function POST(request) {
     if (replyTo && !(await messageLogSchema.exists({ message_id: replyTo, group_id: receiverId, receiver_id: senderId }))) {
       return NextResponse.json({ success: false, message: "The message you are replying to is unavailable." }, { status: 400 });
     }
-  } else if (senderId.equals(receiverId) || !(await userSchema.exists({ _id: receiverId, status: 1 }))) {
+  } else if (senderId.equals(receiverId)) {
     return NextResponse.json({ success: false, message: "Recipient not found." }, { status: 404 });
-  } else if (
-    replyTo &&
-    !(await messageLogSchema.exists({
+  } else {
+    const [senderProfile, receiverProfile] = await Promise.all([
+      userSchema.findById(senderId).select("blockedUsers").lean(),
+      userSchema.findOne({ _id: receiverId, status: 1 }).select("blockedUsers").lean(),
+    ]);
+    if (!receiverProfile) {
+      return NextResponse.json({ success: false, message: "Recipient not found." }, { status: 404 });
+    }
+    const blockedBySender = (senderProfile?.blockedUsers || []).some((id) => String(id) === String(receiverId));
+    const blockedByReceiver = (receiverProfile.blockedUsers || []).some((id) => String(id) === String(senderId));
+    if (blockedBySender || blockedByReceiver) {
+      return NextResponse.json({
+        success: false,
+        message: blockedBySender ? "Unblock this contact before sending messages." : "This contact has blocked you.",
+      }, { status: 403 });
+    }
+  }
+  if (!isGroup && replyTo && !(await messageLogSchema.exists({
       message_id: replyTo,
       $or: [
         { sender_id: senderId, receiver_id: receiverId },
         { sender_id: receiverId, receiver_id: senderId },
       ],
       group_id: { $exists: false },
-    }))
-  ) {
+    }))) {
     return NextResponse.json({ success: false, message: "The message you are replying to is unavailable." }, { status: 400 });
   }
 
@@ -289,6 +303,13 @@ export async function POST(request) {
   // Notification like WhatsApp: "<sender>" (or "<sender> @ <group>") with the text; tapping it opens that chat.
   // For a direct message the chat to open on the receiver's phone is the SENDER's (receiver_id is the receiver).
   const pushRecipients = (isGroup ? recipientIds : [receiver_id]).filter((id) => id !== sessionUserId);
+  const pendingCounts = pushRecipients.length
+    ? await messageLogSchema.aggregate([
+        { $match: { receiver_id: { $in: pushRecipients.map((id) => new mongoose.Types.ObjectId(id)) }, status: 0 } },
+        { $group: { _id: "$receiver_id", count: { $sum: 1 } } },
+      ])
+    : [];
+  const unreadByUser = new Map(pendingCounts.map((item) => [String(item._id), item.count]));
   const notificationBody = text || (type === "image" ? "📷 Photo" : type === "audio" ? "🎤 Voice message" : type === "video" ? "🎥 Video" : "📎 Attachment");
   const ticketId = isGroup ? receiver_id : sessionUserId;
   const [senderInfo, groupInfo] = await Promise.all([
@@ -296,12 +317,13 @@ export async function POST(request) {
     isGroup ? groupSchema.findById(receiverId).select("name").lean() : null,
   ]).catch(() => [null, null]);
   const senderName = senderInfo?.name || "New message";
-  await sendPushNotification(pushRecipients, {
+  await sendPushNotification(pushRecipients, (recipientId) => ({
     title: isGroup ? `${senderName} @ ${groupInfo?.name || "Group"}` : senderName,
     body: notificationBody.slice(0, 180),
     url: `/?ticket=${encodeURIComponent(ticketId)}&is_group=${isGroup ? "1" : "0"}`,
     tag: `message-${ticketId}`,
-  }).catch((error) => console.error("Unable to prepare a Web Push notification:", error));
+    badge: unreadByUser.get(recipientId) || 0,
+  })).catch((error) => console.error("Unable to prepare a Web Push notification:", error));
 
   return NextResponse.json({
     success: true,
