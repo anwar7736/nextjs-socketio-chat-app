@@ -6,6 +6,7 @@ import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { groupSchema } from "@/app/models/groupModel";
 import { userSchema } from "@/app/models/userModel";
 import { sendPushNotification } from "@/app/lib/pushNotifications";
+import { createHmac } from "crypto";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 
@@ -28,9 +29,15 @@ export async function GET(request) {
   const currentUserId = new mongoose.Types.ObjectId(sessionUserId);
   const referenceId = new mongoose.Types.ObjectId(refId);
   let match;
+  let unreadLogs;
   if (isGroup) {
     const membership = await groupMemberSchema.exists({ group_id: referenceId, user_id: currentUserId, status: 1 });
     if (!membership) return NextResponse.json({ success: false, message: "You are not a member of this group." }, { status: 403 });
+    unreadLogs = await messageLogSchema.find({
+      group_id: referenceId,
+      receiver_id: currentUserId,
+      status: 0,
+    }).select("message_id sender_id").limit(200).lean();
     await messageLogSchema.updateMany(
       { group_id: referenceId, receiver_id: currentUserId, status: 0 },
       { $set: { status: 1 } }
@@ -40,6 +47,12 @@ export async function GET(request) {
     if (referenceId.equals(currentUserId)) {
       return NextResponse.json({ success: false, message: "A conversation partner is required." }, { status: 400 });
     }
+    unreadLogs = await messageLogSchema.find({
+      sender_id: referenceId,
+      receiver_id: currentUserId,
+      group_id: { $exists: false },
+      status: 0,
+    }).select("message_id sender_id").sort({ createdAt: -1 }).limit(200).lean();
     await messageLogSchema.updateMany(
       { sender_id: referenceId, receiver_id: currentUserId, group_id: { $exists: false }, status: 0 },
       { $set: { status: 1 } }
@@ -67,11 +80,36 @@ export async function GET(request) {
     { $unwind: "$sender" },
     { $lookup: { from: "users", localField: "receiver_id", foreignField: "_id", as: "receiver" } },
     { $unwind: "$receiver" },
+    { $lookup: { from: "message_logs", localField: "message_id", foreignField: "message_id", as: "message_receipts" } },
+    {
+      $addFields: {
+        seen_by_ids: {
+          $map: {
+            input: {
+              $filter: {
+                input: "$message_receipts",
+                as: "receipt",
+                cond: {
+                  $and: [
+                    { $eq: ["$$receipt.status", 1] },
+                    { $ne: ["$$receipt.receiver_id", currentUserId] },
+                    { $ne: ["$$receipt.receiver_id", "$sender_id"] },
+                  ],
+                },
+              },
+            },
+            as: "receipt",
+            in: "$$receipt.receiver_id",
+          },
+        },
+      },
+    },
     {
       $project: {
         _id: 1,
         message_id: 1,
         status: 1,
+        seen_by_ids: 1,
         "group._id": 1,
         "group.name": 1,
         "group.photo": 1,
@@ -95,7 +133,69 @@ export async function GET(request) {
     },
     { $sort: { "message.createdAt": 1 } },
   ]);
-  return NextResponse.json({ success: true, data });
+
+  const memberIds = new Set();
+  for (const item of data) {
+    for (const id of item.seen_by_ids || []) memberIds.add(String(id));
+    for (const reaction of item.message?.reactions || []) memberIds.add(String(reaction.user_id));
+  }
+  const memberProfiles = memberIds.size
+    ? await userSchema.find({ _id: { $in: [...memberIds].map((id) => new mongoose.Types.ObjectId(id)) } })
+      .select("name photo").lean()
+    : [];
+  const profilesById = new Map(memberProfiles.map((profile) => [String(profile._id), profile]));
+  const enrichedData = data.map((item) => {
+    const seenBy = (item.seen_by_ids || [])
+      .map((id) => profilesById.get(String(id)))
+      .filter(Boolean)
+      .map((profile) => ({ _id: String(profile._id), name: profile.name, photo: profile.photo }));
+    const reactions = (item.message?.reactions || []).map((reaction) => {
+      const profile = profilesById.get(String(reaction.user_id));
+      return {
+        user_id: String(reaction.user_id),
+        emoji: reaction.emoji,
+        ...(profile ? { name: profile.name, photo: profile.photo } : {}),
+      };
+    });
+    return {
+      ...item,
+      seen_by: seenBy,
+      message: { ...item.message, reactions },
+      seen_by_ids: undefined,
+    };
+  });
+
+  const unreadBySender = new Map();
+  for (const log of unreadLogs || []) {
+    const senderId = String(log.sender_id);
+    if (senderId === sessionUserId) continue;
+    const ids = unreadBySender.get(senderId) || [];
+    ids.push(String(log.message_id));
+    unreadBySender.set(senderId, ids);
+  }
+  const actor = unreadBySender.size
+    ? await userSchema.findById(currentUserId).select("name photo").lean()
+    : null;
+  const secret = process.env.AUTH_SECRET ||
+    (process.env.NODE_ENV !== "production" && "local-development-only-secret-change-before-deploy");
+  const issuedAt = Date.now();
+  const seenEvents = secret && actor
+    ? [...unreadBySender.entries()].map(([senderId, messageIds]) => {
+      const event = {
+        actor_id: sessionUserId,
+        actor_name: actor.name || "Someone",
+        actor_photo: actor.photo || "",
+        message_ids: messageIds,
+        recipient_ids: [senderId],
+      };
+      const signature = createHmac("sha256", secret)
+        .update(JSON.stringify({ event, issuedAt }))
+        .digest("base64url");
+      return { ...event, issuedAt, signature };
+    })
+    : [];
+
+  return NextResponse.json({ success: true, data: enrichedData, seen_events: seenEvents });
 }
 
 export async function POST(request) {

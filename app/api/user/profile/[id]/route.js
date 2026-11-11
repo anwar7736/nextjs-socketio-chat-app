@@ -90,7 +90,47 @@ export async function GET(request, content) {
     if (!sessionUserId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
     if (!mongoose.isValidObjectId(id)) return NextResponse.json({ success: false, message: "Invalid user." }, { status: 400 });
     await mongoDB_connect();
-    const data = await userSchema.findById(id, { name: 1, photo: 1 });
+    const data = await userSchema.findById(id, { name: 1, photo: 1, lastSeenAt: 1 });
     if (!data) return NextResponse.json({ success: false, message: "User not found." }, { status: 404 });
     return NextResponse.json({ success: true, data });
+}
+
+export async function PATCH(request, content) {
+    const sessionUserId = await getSessionUserId(request);
+    const id = content.params.id;
+    if (!sessionUserId || id !== sessionUserId) {
+        return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 403 });
+    }
+
+    let body;
+    try {
+        body = await request.json();
+    } catch {
+        return NextResponse.json({ success: false, message: "Invalid request body." }, { status: 400 });
+    }
+
+    const contactId = body?.contact_id;
+    const nickname = typeof body?.nickname === "string" ? body.nickname.trim() : null;
+    if (
+        typeof contactId !== "string" ||
+        !mongoose.isValidObjectId(contactId) ||
+        contactId === sessionUserId ||
+        nickname === null ||
+        nickname.length > 40
+    ) {
+        return NextResponse.json({ success: false, message: "Enter a nickname of up to 40 characters." }, { status: 400 });
+    }
+
+    await mongoDB_connect();
+    if (!(await userSchema.exists({ _id: contactId, status: 1 }))) {
+        return NextResponse.json({ success: false, message: "Conversation partner not found." }, { status: 404 });
+    }
+
+    const key = `nicknames.${contactId}`;
+    const update = nickname
+        ? { $set: { [key]: nickname } }
+        : { $unset: { [key]: 1 } };
+    await userSchema.updateOne({ _id: sessionUserId }, update);
+
+    return NextResponse.json({ success: true, nickname });
 }

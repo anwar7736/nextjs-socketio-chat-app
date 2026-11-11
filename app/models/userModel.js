@@ -11,6 +11,8 @@ const userModel = new mongoose.Schema({
     "pendingTwoFactorSecret": { type: String, select: false },
     "address":String,
     "photo":String,
+    "lastSeenAt": Date,
+    "nicknames": { type: Map, of: String },
     "status": {type: Number, default: 1 }, // 0=>inactive, 1=>active
 }, {
     timestamps: true

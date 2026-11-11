@@ -15,7 +15,6 @@ import ValidationError from "./ValidationError";
 import Swal from "sweetalert2";
 const socket = socket_connection();
 const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
-  if (!isOpen) return null;
   const {
     register,
     handleSubmit,
@@ -34,12 +33,45 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
   const [memberError, setMemberError] = useState("");
   const [adminError, setAdminError] = useState("");
   const [serverError, setServerError] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [savingNickname, setSavingNickname] = useState(false);
   const { user, setUser } = useContext(AuthContext);
   const { user: selectedUser, setUser: setSelectedUser } =
     useContext(UserContext);
   const { users: userList, setUsers: setUserList } =
     useContext(UserListContext);
   const { messages, setMessages } = useContext(MessageContext);
+
+  useEffect(() => {
+    if (isOpen) setNickname(selectedUser?.nickname || "");
+  }, [isOpen, selectedUser?._id, selectedUser?.nickname]);
+
+  const saveNickname = async () => {
+    if (savingNickname || selectedUser?.is_group === 1) return;
+    setSavingNickname(true);
+    try {
+      const response = await fetch(`/api/user/profile/${user?._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: selectedUser?._id, nickname }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to save this nickname.");
+      }
+
+      const updatedContact = { ...selectedUser, nickname: result.nickname };
+      setSelectedUser(updatedContact);
+      setUserList((current) => current.map((item) =>
+        item?._id === updatedContact?._id ? { ...item, nickname: result.nickname } : item
+      ));
+      toast.success(result.nickname ? "Nickname updated." : "Nickname removed.");
+    } catch (error) {
+      toast.error(error.message || "Unable to save this nickname.");
+    } finally {
+      setSavingNickname(false);
+    }
+  };
 
   const editGroupFormHandler = async (input) => {
     setIsDisabled(true);
@@ -302,6 +334,8 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     setValue("short_desc", data?.short_desc);
     setPreview(getImageURL(data?.photo));
   }, []);
+
+  if (!isOpen || !data) return null;
 
   return data.is_group === 1 ? (
     <form
@@ -620,6 +654,30 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             ) : null}
             <h1 className="break-words px-8 text-lg font-bold">{data.name}</h1>
             <div className="w-full max-w-md mt-5">
+              <div className="mb-4 text-left">
+                <label className="mb-2 block text-sm font-semibold" htmlFor="contact-nickname">
+                  Nickname
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="contact-nickname"
+                    className="min-w-0 flex-1 rounded-xl border border-[#263248] bg-[#0c1321] px-3 py-2 text-sm text-white"
+                    value={nickname}
+                    maxLength={40}
+                    placeholder={selectedUser?.name || "Set a nickname"}
+                    onChange={(event) => setNickname(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="rounded-xl bg-indigo-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    onClick={saveNickname}
+                    disabled={savingNickname}
+                  >
+                    {savingNickname ? "Saving..." : "Save"}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-[#91a0b7]">Only you will see this name.</p>
+              </div>
               <div className="mb-4">
                 <div>{data.phone}</div>
               </div>

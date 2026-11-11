@@ -5,6 +5,7 @@ import { getSessionUserId } from "@/app/lib/session";
 import { removeFile } from "@/app/lib/fileStore";
 import { messageSchema } from "@/app/models/messageModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
+import { userSchema } from "@/app/models/userModel";
 import mongoose from "mongoose";
 import path from "path";
 import { NextResponse } from "next/server";
@@ -68,7 +69,10 @@ export async function DELETE(request, context) {
   });
 }
 
-const reactionEmojis = new Set(["👍", "❤️", "😂", "😮", "😢", "🙏"]);
+const isEmoji = (value) =>
+  typeof value === "string" &&
+  value.length <= 32 &&
+  /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u.test(value);
 
 export async function PUT(request, context) {
   const userId = await getSessionUserId(request);
@@ -82,7 +86,7 @@ export async function PUT(request, context) {
   } catch {
     return NextResponse.json({ success: false, message: "Invalid request body." }, { status: 400 });
   }
-  if (!reactionEmojis.has(body?.emoji)) {
+  if (!isEmoji(body?.emoji)) {
     return NextResponse.json({ success: false, message: "Choose a supported reaction." }, { status: 400 });
   }
 
@@ -110,11 +114,23 @@ export async function PUT(request, context) {
   const recipientIds = log.group_id
     ? (await messageLogSchema.find({ message_id: log.message_id }).distinct("receiver_id")).map(String)
     : [String(message.sender_id), String(log.sender_id), String(log.receiver_id)];
+  const reactionProfiles = await userSchema.find({
+    _id: { $in: message.reactions.map(({ user_id }) => user_id) },
+  }).select("name photo").lean();
+  const profilesById = new Map(reactionProfiles.map((profile) => [String(profile._id), profile]));
+  const reactions = message.reactions.map(({ user_id, emoji }) => {
+    const profile = profilesById.get(String(user_id));
+    return {
+      user_id: String(user_id),
+      emoji,
+      ...(profile ? { name: profile.name, photo: profile.photo } : {}),
+    };
+  });
   const reactionEvent = {
     actor_id: userId,
     message_id: String(log.message_id),
     recipient_ids: [...new Set(recipientIds)],
-    reactions: message.reactions.map(({ user_id, emoji }) => ({ user_id: String(user_id), emoji })),
+    reactions,
   };
   const issuedAt = Date.now();
   const signingSecret = process.env.AUTH_SECRET ||
@@ -130,7 +146,7 @@ export async function PUT(request, context) {
     message_id: String(log.message_id),
     group_id: log.group_id ? String(log.group_id) : null,
     recipient_ids: [...new Set(recipientIds)],
-    reactions: message.reactions.map(({ user_id, emoji }) => ({ user_id: String(user_id), emoji })),
+    reactions,
     socket_event: { ...reactionEvent, issuedAt, signature },
   });
 }

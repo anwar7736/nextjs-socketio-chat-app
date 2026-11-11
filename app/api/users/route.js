@@ -15,6 +15,10 @@ export async function GET(request) {
     }
     await mongoDB_connect();
     const authObjectId = new mongoose.Types.ObjectId(userId);
+    const currentUser = await userSchema.findById(authObjectId).select("nicknames").lean();
+    const nicknames = currentUser?.nicknames instanceof Map
+        ? Object.fromEntries(currentUser.nicknames)
+        : currentUser?.nicknames || {};
     const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let data = await userSchema.aggregate([
         // User Query
@@ -66,6 +70,7 @@ export async function GET(request) {
                 _id: 1,
                 name: 1,
                 photo: 1,
+                lastSeenAt: 1,
                 pending: 1,
                 last_activity: 1,
                 is_group: 1,
@@ -105,6 +110,17 @@ export async function GET(request) {
                                         as: "member",
                                         cond: { $eq: ["$$member.status", 1] }
                                     }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        $addFields: {
+                            member_ids: {
+                                $map: {
+                                    input: { $filter: { input: "$members", as: "member", cond: { $eq: ["$$member.status", 1] } } },
+                                    as: "member",
+                                    in: "$$member.user_id"
                                 }
                             }
                         }
@@ -150,6 +166,7 @@ export async function GET(request) {
                             _id: 1,
                             name: 1,
                             photo: 1,
+                            member_ids: 1,
                             pending: 1,
                             last_activity: 1,
                             is_group: 1,
@@ -165,6 +182,9 @@ export async function GET(request) {
         }
     ]);
     
-
-    return NextResponse.json({ success: true, data });
+    const withNicknames = data.map((item) => ({
+        ...item,
+        ...(Number(item.is_group) === 0 ? { nickname: nicknames[String(item._id)] || "" } : {}),
+    }));
+    return NextResponse.json({ success: true, data: withNicknames });
 }

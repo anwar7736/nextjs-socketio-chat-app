@@ -337,6 +337,7 @@ export async function PUT(request) {
             name,
             photo: inputs.photo,
             total_members: group_members?.length,
+            member_ids: groupMembersArray.map(String),
             response,
             causer_id: created_by
         };

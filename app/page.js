@@ -13,6 +13,7 @@ import { MessageContext } from "./contexts/MessageContext";
 import { UserContext } from "./contexts/UserContext";
 import { UserListContext } from "./contexts/UserListContext";
 import {
+  activityFormat,
   auth,
   getImageURL,
   loadMessages,
@@ -68,6 +69,8 @@ const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
   const [isUserListLoading, setIsUserListLoading] = useState(true);
   const [activeUsers, setActiveUsers] = useState([]);
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [activityNow, setActivityNow] = useState(Date.now());
   const { user, setUser } = useContext(UserContext);
   // const { user: authUser, setUser: setAuthUser } = useContext(AuthContext)
   const { messages, setMessages } = useContext(MessageContext);
@@ -91,6 +94,9 @@ const Home = () => {
   const emojiRef = useRef(null);
   const userListRequestRef = useRef(0);
   const allowAppExitRef = useRef(false);
+  const typingTimerRef = useRef(null);
+  const typingActiveRef = useRef(false);
+  const typingUsersTimersRef = useRef(new Map());
   const syncChatViewport = useCallback(() => {
     const viewport = window.visualViewport;
     document.documentElement.style.setProperty(
@@ -103,6 +109,72 @@ const Home = () => {
     );
   }, []);
   const authUser = auth();
+  const emitTypingStatus = useCallback((typing, conversation = user) => {
+    if (!conversation?._id || !authUser?._id) return;
+    socket.emit("typing-status", {
+      sender_id: authUser._id,
+      sender_name: authUser.name,
+      receiver_id: conversation._id,
+      is_group: conversation.is_group === 1,
+      recipient_ids: conversation.is_group === 1
+        ? (conversation.member_ids || []).map(String)
+        : undefined,
+      typing,
+    });
+  }, [authUser?._id, authUser?.name, user]);
+
+  const stopTyping = useCallback((conversation = user) => {
+    clearTimeout(typingTimerRef.current);
+    if (typingActiveRef.current) emitTypingStatus(false, conversation);
+    typingActiveRef.current = false;
+  }, [emitTypingStatus, user]);
+
+  const handleMessageTyping = (value) => {
+    if (!value.trim()) {
+      stopTyping();
+      return;
+    }
+    if (!typingActiveRef.current) {
+      typingActiveRef.current = true;
+      emitTypingStatus(true);
+    }
+    clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => stopTyping(), 1200);
+  };
+
+  useEffect(() => {
+    setTypingUsers([]);
+    typingUsersTimersRef.current.forEach((timer) => clearTimeout(timer));
+    typingUsersTimersRef.current.clear();
+    return () => stopTyping(user);
+  }, [stopTyping, user]);
+
+  useEffect(() => {
+    if (!authUser?._id) return;
+    const updatePresence = () => {
+      fetch("/api/user/presence", { method: "POST", keepalive: true })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("Unable to update activity status.");
+        })
+        .catch((error) => console.warn(error.message));
+    };
+    updatePresence();
+    const interval = setInterval(updatePresence, 60_000);
+    const activityInterval = setInterval(() => setActivityNow(Date.now()), 60_000);
+    const onPageHide = () => updatePresence();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") updatePresence();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      clearInterval(activityInterval);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [authUser?._id]);
+
   const onEmojiClick = (emojiObject) => {
     setMessage((msg) => msg + emojiObject.emoji); // picker stays open, like WhatsApp, for several emojis
   };
@@ -273,6 +345,7 @@ const Home = () => {
 
   const sendMessage = async (e) => {
     e?.preventDefault();
+    stopTyping();
     if (sending) return;
     if (!message.trim() && !attachment) {
       setMessageError("Enter a message or attach a file before sending.");
@@ -420,6 +493,44 @@ const Home = () => {
       setActiveUsers(data);
     });
 
+    socket.off("user-offline");
+    socket.on("user-offline", (data) => {
+      const lastSeenAt = data?.last_seen_at;
+      if (!data?.user_id || !lastSeenAt) return;
+      setUsers((current) => current.map((item) =>
+        item?._id === data.user_id ? { ...item, lastSeenAt } : item
+      ));
+      setUser((current) =>
+        current?._id === data.user_id ? { ...current, lastSeenAt } : current
+      );
+    });
+
+    socket.off("typing-status");
+    socket.on("typing-status", (event) => {
+      const sameConversation =
+        event?.receiver_id === user?._id &&
+        Boolean(event?.is_group) === (user?.is_group === 1);
+      if (!sameConversation || !event?.sender_id) return;
+
+      const timers = typingUsersTimersRef.current;
+      const existingTimer = timers.get(event.sender_id);
+      if (existingTimer) clearTimeout(existingTimer);
+      if (!event.typing) {
+        timers.delete(event.sender_id);
+        setTypingUsers((current) => current.filter((item) => item.user_id !== event.sender_id));
+        return;
+      }
+
+      setTypingUsers((current) => [
+        ...current.filter((item) => item.user_id !== event.sender_id),
+        { user_id: event.sender_id, name: event.sender_name || "Someone" },
+      ]);
+      timers.set(event.sender_id, setTimeout(() => {
+        timers.delete(event.sender_id);
+        setTypingUsers((current) => current.filter((item) => item.user_id !== event.sender_id));
+      }, 3500));
+    });
+
     //new user registered
     socket.off("new-user");
     socket.on("new-user", (data) => {
@@ -475,6 +586,24 @@ const Home = () => {
       ));
     });
 
+    socket.off("messages-seen");
+    socket.on("messages-seen", (event) => {
+      const messageIds = new Set(event?.message_ids || []);
+      if (!event?.actor_id || !messageIds.size) return;
+      const viewer = {
+        _id: event.actor_id,
+        name: event.actor_name || "Someone",
+        photo: event.actor_photo || "",
+      };
+      setMessages((current) => (current || []).map((item) => {
+        if (!messageIds.has(item?.message_id)) return item;
+        const seenBy = item?.seen_by || [];
+        return seenBy.some((person) => person?._id === viewer._id)
+          ? item
+          : { ...item, seen_by: [...seenBy, viewer] };
+      }));
+    });
+
     socket.off("add-group");
     socket.on("add-group", (data) => {
       let newUser = {
@@ -484,6 +613,7 @@ const Home = () => {
         pending: 0,
         is_group: 1,
         total_members: data?.group_members?.length,
+        member_ids: (data?.group_members || []).map((member) => String(member?.user_id)).filter(Boolean),
       };
 
       let newUsers = [...users, newUser];
@@ -500,28 +630,30 @@ const Home = () => {
       if (data?.res?.status === 0) {
         let newUsers = users.filter((user) => user._id !== data?._id);
         setUsers(newUsers);
-        if (user._id === data?._id) {
+        if (user?._id === data?._id) {
           setUser("");
           setMessages([]);
         }
-      }
-
-      if (data?.res?.status === 1) {
-        let newUser = {
+      } else {
+        const newUser = {
           _id: data?._id,
           name: data?.name,
           photo: data?.photo,
-          pending: 0,
+          member_ids: data?.member_ids || [],
           is_group: 1,
           total_members: data?.total_members,
         };
 
-        let newUsers = [...users, newUser];
-
-        setUsers(newUsers);
+        setUsers((current) => {
+          const exists = current.some((item) => item?._id === newUser._id);
+          return exists
+            ? current.map((item) => item?._id === newUser._id ? { ...item, ...newUser } : item)
+            : [...current, { ...newUser, pending: 0 }];
+        });
+        setUser((current) => current?._id === newUser._id ? { ...current, ...newUser } : current);
       }
 
-      toast.success(data?.res?.message);
+      if (data?.res?.message) toast.success(data.res.message);
     });
 
     socket.off("delete-group");
@@ -662,11 +794,17 @@ const Home = () => {
                   title={user?.name}
                 />
                 <span className="truncate">
-                  <span className="block truncate text-sm font-semibold sm:text-base">{user?.name}</span>
+                  <span className="block truncate text-sm font-semibold sm:text-base">{user?.nickname || user?.name}</span>
                   <span className="block text-xs text-[#91a0b7]">
                     {user?.is_group === 1
-                      ? `${user?.total_members || 0} members`
-                      : activeUsers.includes(user?._id) ? "Online" : "Conversation"}
+                      ? typingUsers.length
+                        ? `${typingUsers.slice(0, 2).map((person) => person.name).join(", ")}${typingUsers.length > 2 ? ` +${typingUsers.length - 2}` : ""} typing…`
+                        : `${user?.total_members || 0} members`
+                      : typingUsers.length
+                        ? "Typing…"
+                        : activeUsers.includes(user?._id)
+                          ? "Active now"
+                          : activityFormat(user?.lastSeenAt, activityNow)}
                   </span>
                 </span>
                 {activeUsers.includes(user?._id) && (
@@ -760,6 +898,7 @@ const Home = () => {
                         aria-invalid={Boolean(messageError)}
                         onChange={(event) => {
                           setMessage(event.target.value);
+                          handleMessageTyping(event.target.value);
                           setMessageError("");
                           event.target.style.height = "auto";
                           event.target.style.height = `${Math.min(event.target.scrollHeight, 140)}px`;
@@ -772,6 +911,7 @@ const Home = () => {
                           event.preventDefault();
                           sendMessage(event);
                         }}
+                        onBlur={() => stopTyping()}
                         value={message}
                       />
                     </div>

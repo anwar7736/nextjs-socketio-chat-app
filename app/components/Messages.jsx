@@ -1,7 +1,9 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { FiArrowLeft, FiChevronDown, FiCornerUpLeft, FiTrash2, FiX } from "react-icons/fi";
+import Picker from "emoji-picker-react";
+import { FiArrowLeft, FiChevronDown, FiCornerUpLeft, FiPlus, FiTrash2, FiX } from "react-icons/fi";
 import { dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
 import { AuthContext } from "../contexts/AuthContext";
+import { UserContext } from "../contexts/UserContext";
 import { toast } from "react-toastify";
 import { MessageContext } from "../contexts/MessageContext";
 
@@ -16,9 +18,13 @@ const Messages = () => {
   const holdTimerRef = useRef(null);
   const touchRef = useRef(null); // { id, x, y, dx, swiping, held }
   const { user } = useContext(AuthContext);
+  const { user: conversationUser } = useContext(UserContext);
   const { messages, setMessages } = useContext(MessageContext);
   const [selectedIds, setSelectedIds] = useState([]);
   const [reactionFor, setReactionFor] = useState(null); // message whose reaction bar is open
+  const [emojiPickerFor, setEmojiPickerFor] = useState(null);
+  const [reactionDetailsFor, setReactionDetailsFor] = useState(null);
+  const [reactionFilter, setReactionFilter] = useState("all");
   const [swipe, setSwipe] = useState({ id: null, dx: 0 });
   const [preview, setPreview] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -109,12 +115,14 @@ const Messages = () => {
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       if (deleteConfirmationOpen) setDeleteConfirmationOpen(false);
+      else if (reactionDetailsFor) setReactionDetailsFor(null);
+      else if (emojiPickerFor) setEmojiPickerFor(null);
       else if (preview) closePreview();
       else clearSelection();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [preview, deleteConfirmationOpen, closePreview, clearSelection]);
+  }, [preview, deleteConfirmationOpen, reactionDetailsFor, emojiPickerFor, closePreview, clearSelection]);
 
   /* ---------- delete ---------- */
   const removeMessage = async (msg) => {
@@ -200,6 +208,7 @@ const Messages = () => {
   /* ---------- reactions & reply ---------- */
   const applyReaction = async (msg, emoji) => {
     clearSelection();
+    setEmojiPickerFor(null);
     try {
       const response = await fetch(`/api/messages/${msg?._id}`, {
         method: "PUT",
@@ -294,6 +303,25 @@ const Messages = () => {
   if (!socket) return null;
 
   const selectedMessages = (messages || []).filter((msg) => selectedIds.includes(msg?._id));
+  const lastSeenMessageByUser = new Map();
+  for (const msg of messages || []) {
+    if (msg?.sender?._id !== user?._id) continue;
+    for (const viewer of msg?.seen_by || []) {
+      lastSeenMessageByUser.set(viewer?._id, { ...viewer, messageId: msg?._id });
+    }
+  }
+  const seenMessageIds = new Set(
+    [...lastSeenMessageByUser.values()].map((viewer) => viewer.messageId)
+  );
+  const reactionDetailsMessage = (messages || []).find((msg) => msg?._id === reactionDetailsFor);
+  const reactionDetails = reactionDetailsMessage?.message?.reactions || [];
+  const reactionDetailsGroups = reactionDetails.reduce((groups, reaction) => {
+    groups.set(reaction.emoji, (groups.get(reaction.emoji) || 0) + 1);
+    return groups;
+  }, new Map());
+  const filteredReactionDetails = reactionFilter === "all"
+    ? reactionDetails
+    : reactionDetails.filter((reaction) => reaction.emoji === reactionFilter);
   const ownSelectedCount = selectedMessages.filter((msg) => msg?.sender?._id === user?._id).length;
   const receivedSelectedCount = selectedMessages.length - ownSelectedCount;
 
@@ -369,6 +397,57 @@ const Messages = () => {
           </section>
         </div>
       )}
+      {reactionDetailsFor && reactionDetailsMessage && (
+        <div
+          className="reaction-details-overlay"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setReactionDetailsFor(null);
+          }}
+        >
+          <section
+            className="reaction-details-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reaction-details-title"
+          >
+            <header className="reaction-details-header">
+              <h2 id="reaction-details-title">Reactions</h2>
+              <button type="button" onClick={() => setReactionDetailsFor(null)} aria-label="Close reactions">
+                <FiX />
+              </button>
+            </header>
+            <div className="reaction-details-tabs" role="tablist" aria-label="Filter reactions">
+              <button
+                type="button"
+                className={reactionFilter === "all" ? "is-active" : ""}
+                onClick={() => setReactionFilter("all")}
+              >
+                All {reactionDetails.length}
+              </button>
+              {[...reactionDetailsGroups.entries()].map(([emoji, count]) => (
+                <button
+                  type="button"
+                  key={emoji}
+                  className={reactionFilter === emoji ? "is-active" : ""}
+                  onClick={() => setReactionFilter(emoji)}
+                >
+                  {emoji} {count}
+                </button>
+              ))}
+            </div>
+            <div className="reaction-details-list">
+              {filteredReactionDetails.map((reaction, index) => (
+                <div className="reaction-person" key={`${reaction.user_id}-${reaction.emoji}-${index}`}>
+                  <img src={getImageURL(reaction.photo)} alt="" />
+                  <span>{reaction.name || "Conversation member"}</span>
+                  <span className="reaction-person-emoji">{reaction.emoji}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
       <div className="message-scroll" id="root" ref={elementRef}>
         {(messages || []).map((data) => {
           const sender = data?.sender;
@@ -378,6 +457,10 @@ const Messages = () => {
           const mine = sender?._id === user?._id;
           const selected = selectedIds.includes(data?._id);
           const reactions = data?.message?.reactions || data?.reactions || [];
+          const messageReactionGroups = reactions.reduce((groups, reaction) => {
+            groups.set(reaction.emoji, (groups.get(reaction.emoji) || 0) + 1);
+            return groups;
+          }, new Map());
           const repliedTo = (messages || []).find((item) => item?.message_id === data?.message?.reply_to);
           const dx = swipe.id === data?._id ? swipe.dx : 0;
           return (
@@ -389,7 +472,11 @@ const Messages = () => {
                 if (selecting && !event.target.closest(".message-bubble, .message-action-menu")) toggleSelected(data?._id);
               }}
             >
-              {!mine && <div className="mb-1 ml-11 text-xs text-[#91a0b7]">{sender?.name}</div>}
+              {!mine && (
+                <div className="mb-1 ml-11 text-xs text-[#91a0b7]">
+                  {conversationUser?.is_group === 1 ? sender?.name : conversationUser?.nickname || sender?.name}
+                </div>
+              )}
               <div className={`flex items-end gap-2 ${mine ? "justify-end" : ""}`}>
                 {!mine && (
                   <img
@@ -442,10 +529,19 @@ const Messages = () => {
                   </div>
                   {reactions.length > 0 && (
                     <div className={`message-reactions ${mine ? "right-2" : "left-2"}`}>
-                      {quickReactions.map((emoji) => {
-                        const count = reactions.filter((reaction) => reaction.emoji === emoji).length;
-                        return count ? <span key={emoji}>{emoji}{count > 1 ? ` ${count}` : ""}</span> : null;
-                      })}
+                      {[...messageReactionGroups.entries()].map(([emoji, count]) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => {
+                            setReactionDetailsFor(data?._id);
+                            setReactionFilter(emoji);
+                          }}
+                          aria-label={`${count} reaction${count === 1 ? "" : "s"} with ${emoji}`}
+                        >
+                          {emoji}{count > 1 ? ` ${count}` : ""}
+                        </button>
+                      ))}
                     </div>
                   )}
                   {reactionFor === data?._id && selectedIds.length === 1 && selected && (
@@ -468,6 +564,33 @@ const Messages = () => {
                           </button>
                         );
                       })}
+                      <button
+                        type="button"
+                        className="reaction-more-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEmojiPickerFor((current) => current === data?._id ? null : data?._id);
+                        }}
+                        aria-label="More emoji reactions"
+                        title="More emoji"
+                      >
+                        <FiPlus />
+                      </button>
+                    </div>
+                  )}
+                  {emojiPickerFor === data?._id && (
+                    <div
+                      className={`reaction-picker-popover ${mine ? "right-0" : "left-0"}`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <Picker
+                        theme="dark"
+                        width="min(320px, 85vw)"
+                        height={360}
+                        lazyLoadEmojis
+                        previewConfig={{ showPreview: false }}
+                        onEmojiClick={(emoji) => applyReaction(data, emoji.emoji)}
+                      />
                     </div>
                   )}
                 </div>
@@ -483,6 +606,21 @@ const Messages = () => {
               <div className={`mt-1 text-xs text-[#728099] ${mine ? "mr-10 text-right" : "ml-10"}`}>
                 {dateTimeFormat(data?.message?.createdAt)}
               </div>
+              {mine && seenMessageIds.has(data?._id) && (
+                <div className="message-seen-avatars" aria-label="Seen by">
+                  {[...lastSeenMessageByUser.values()]
+                    .filter((viewer) => viewer.messageId === data?._id)
+                    .slice(0, 4)
+                    .map((viewer) => (
+                      <img
+                        key={viewer._id}
+                        src={getImageURL(viewer.photo)}
+                        alt={`Seen by ${viewer.name || "conversation member"}`}
+                        title={`Seen by ${viewer.name || "conversation member"}`}
+                      />
+                    ))}
+                </div>
+              )}
             </div>
           );
         })}
