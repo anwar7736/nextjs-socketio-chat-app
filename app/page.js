@@ -862,9 +862,10 @@ const Home = () => {
                 type="button"
                 className="confirmation-accept"
                 onClick={() => {
-                  setExitConfirmationOpen(false);
                   allowAppExitRef.current = true;
-                  window.history.go(-2);
+                  setExitConfirmationOpen(false);
+                  window.close();
+                  window.history.back();
                 }}
               >
                 Close app
