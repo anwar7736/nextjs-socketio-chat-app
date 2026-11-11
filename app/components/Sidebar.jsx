@@ -13,7 +13,14 @@ import ProfileModal from "./ProfileModal";
 import Users from "./Users";
 let socket = socket_connection();
 
-const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
+const Sidebar = ({
+  search,
+  setSearch,
+  activeUsers,
+  isUserListLoading,
+  setConversationLoading,
+  className = "",
+}) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const sectionRef = useRef(null);
   const router = useRouter();
@@ -288,7 +295,11 @@ const Sidebar = ({ search, setSearch, activeUsers, className = "" }) => {
             <MdAdd></MdAdd>
           </button>
         </div>
-        <Users activeUsers={activeUsers} />
+        <Users
+          activeUsers={activeUsers}
+          isLoading={isUserListLoading}
+          setConversationLoading={setConversationLoading}
+        />
       </div>
       <ProfileModal
         isOpen={isProfileModalOpen}

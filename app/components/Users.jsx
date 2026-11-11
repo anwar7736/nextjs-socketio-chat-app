@@ -1,28 +1,56 @@
 
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useRef } from 'react';
 import { UserContext } from '../contexts/UserContext';
 import { MessageContext } from '../contexts/MessageContext';
-import { auth, getImageURL, loadMessages } from '../helpers/helper';
+import { getImageURL, loadMessages } from '../helpers/helper';
 import { UserListContext } from '../contexts/UserListContext';
-const Users = ({ activeUsers }) => {
+import { toast } from 'react-toastify';
+
+const Users = ({ activeUsers, isLoading, setConversationLoading }) => {
   const { user, setUser } = useContext(UserContext)
   const { users, setUsers } = useContext(UserListContext)
   const {messages, setMessages} = useContext(MessageContext);
+  const requestIdRef = useRef(0);
+
   const getMessages = async (data) => {
+      if (data?._id === user?._id) return;
+      const requestId = ++requestIdRef.current;
+      setConversationLoading(true);
       setMessages([]);
-      setUser([]);
       setUser(data);
-      const index = users.findIndex(u => u?._id == data?._id);
-      users[index].pending = 0;
-      let res = await loadMessages(data);
-      setMessages(res);
-      
+      setUsers((current) => current.map((item) =>
+        item?._id === data?._id ? { ...item, pending: 0 } : item
+      ));
+      try {
+        const result = await loadMessages(data);
+        if (!Array.isArray(result)) throw new Error("Unable to load messages.");
+        if (requestId === requestIdRef.current) setMessages(result);
+      } catch (error) {
+        if (requestId === requestIdRef.current) {
+          toast.error(error.message || "Unable to load messages.");
+        }
+      } finally {
+        if (requestId === requestIdRef.current) setConversationLoading(false);
+      }
   }
   
   return (
     <div>
-      {
-        users.length > 0 ? users?.map(u => {
+      {isLoading ? (
+        <div className="conversation-list-skeleton" role="status" aria-label="Loading conversations">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div className="conversation-skeleton-row" key={index}>
+              <span className="skeleton-shimmer conversation-skeleton-avatar" />
+              <span className="conversation-skeleton-copy">
+                <span className="skeleton-shimmer conversation-skeleton-name" />
+                <span className="skeleton-shimmer conversation-skeleton-preview" />
+              </span>
+            </div>
+          ))}
+          <span className="sr-only">Loading conversations...</span>
+        </div>
+      ) : (
+        users.length > 0 ? users.map(u => {
           return  (<button type="button" key={u?._id} className={`${u?._id == user?._id ? 'bg-[#222f46]' : ''} mb-2 flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-[#1b273b]`} onClick={() => getMessages(u)} >
           <div className="h-11 w-11 shrink-0 rounded-full bg-[#263248]" >
               <img src={getImageURL(u?.photo)} alt="" className="h-11 w-11 rounded-full border border-[#394761] object-cover" title={u?.name}/>
@@ -44,9 +72,8 @@ const Users = ({ activeUsers }) => {
               {/* <p className="text-gray-600 text-xs">{user?.message}</p> */}
           </div>
       </button>)
-        })
-        :  (<small className="text-sm text-[#91a0b7]">No conversations found.</small>)
-      }
+        }) : (<small className="text-sm text-[#91a0b7]">No conversations found.</small>)
+      )}
     </div>
   ) 
 }

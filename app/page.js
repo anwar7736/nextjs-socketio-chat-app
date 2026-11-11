@@ -66,11 +66,13 @@ async function shrinkImage(file, maxSide = 1920) {
 
 const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
+  const [isUserListLoading, setIsUserListLoading] = useState(true);
   const [activeUsers, setActiveUsers] = useState([]);
   const { user, setUser } = useContext(UserContext);
   // const { user: authUser, setUser: setAuthUser } = useContext(AuthContext)
   const { messages, setMessages } = useContext(MessageContext);
   const [message, setMessage] = useState("");
+  const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [isModalOpen, setModalOpen] = useState(false);
   const [data, setData] = useState("");
@@ -86,6 +88,7 @@ const Home = () => {
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
   const emojiRef = useRef(null);
+  const userListRequestRef = useRef(0);
   const authUser = auth();
   const onEmojiClick = (emojiObject) => {
     setMessage((msg) => msg + emojiObject.emoji); // picker stays open, like WhatsApp, for several emojis
@@ -112,12 +115,27 @@ const Home = () => {
   }, [authUser?._id]);
 
   const getUserList = useCallback(async () => {
-    let res = await fetch(
-      `/api/users?auth_id=${authUser._id}&search=${search}`
-    );
-    res = await res.json();
-    if (res.success) {
-      setUsers(res.data);
+    if (!authUser?._id) {
+      setIsUserListLoading(false);
+      return;
+    }
+    const requestId = ++userListRequestRef.current;
+    setIsUserListLoading(true);
+    try {
+      const response = await fetch(
+        `/api/users?auth_id=${authUser._id}&search=${encodeURIComponent(search)}`
+      );
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to load conversations.");
+      }
+      if (requestId === userListRequestRef.current) setUsers(result.data);
+    } catch (error) {
+      if (requestId === userListRequestRef.current) {
+        toast.error(error.message || "Unable to load conversations.");
+      }
+    } finally {
+      if (requestId === userListRequestRef.current) setIsUserListLoading(false);
     }
   }, [authUser?._id, search, setUsers]);
 
@@ -133,27 +151,32 @@ const Home = () => {
     if (!ticketId || !/^[a-f\d]{24}$/i.test(ticketId)) return;
     let cancelled = false;
     const openTicket = async () => {
-      const response = await fetch(`/api/users?auth_id=${authUser._id}`);
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        toast.error(result.message || "Unable to open the notification conversation.");
-        return;
+      setIsConversationLoading(true);
+      try {
+        const response = await fetch(`/api/users?auth_id=${authUser._id}`);
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || "Unable to open the notification conversation.");
+        }
+        const ticket = result.data.find((item) => item._id === ticketId && Number(item.is_group) === Number(isGroup));
+        if (!ticket) throw new Error("This conversation is unavailable.");
+        if (cancelled) return;
+        setUser(ticket);
+        const conversationMessages = await loadMessages(ticket);
+        if (!Array.isArray(conversationMessages)) throw new Error("Unable to load messages.");
+        if (cancelled) return;
+        setMessages(conversationMessages);
+        window.history.replaceState(null, "", "/");
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Unable to open the notification conversation:", error);
+          toast.error(error.message || "Unable to open the notification conversation.");
+        }
+      } finally {
+        if (!cancelled) setIsConversationLoading(false);
       }
-      const ticket = result.data.find((item) => item._id === ticketId && Number(item.is_group) === Number(isGroup));
-      if (!ticket) {
-        toast.error("This conversation is unavailable.");
-        return;
-      }
-      const conversationMessages = await loadMessages(ticket);
-      if (cancelled) return;
-      setUser(ticket);
-      setMessages(conversationMessages || []);
-      window.history.replaceState(null, "", "/");
     };
-    openTicket().catch((error) => {
-      console.error("Unable to open the notification conversation:", error);
-      toast.error("Unable to open the notification conversation.");
-    });
+    openTicket();
     return () => { cancelled = true; };
   }, [authUser?._id, setMessages, setUser]);
 
@@ -526,9 +549,11 @@ const Home = () => {
           setSearch={setSearch}
           search={search}
           activeUsers={activeUsers}
+          isUserListLoading={isUserListLoading}
+          setConversationLoading={setIsConversationLoading}
         />
         <main className={`chat-main ${!user ? "is-hidden-mobile" : ""}`}>
-          <header className="sticky top-0 z-30 flex shrink-0 items-center justify-between border-b border-[#263248] bg-[#111827]/95 px-4 py-3 text-white sm:px-6">
+          <header className="conversation-header sticky top-0 z-30 flex shrink-0 items-center justify-between border-b border-[#263248] bg-[#111827]/95 px-4 py-3 text-white sm:px-6">
             {user ? (
               <div
                 className="flex min-w-0 cursor-pointer items-center gap-3"
@@ -584,7 +609,9 @@ const Home = () => {
             </div>
           </header>
           {user ? (
-            messages?.length > 0 ? (
+            isConversationLoading ? (
+              <MessageLoadingState />
+            ) : messages?.length > 0 ? (
               <Messages key={user?._id} />
             ) : (
               <div className="grid flex-1 place-items-center text-center text-sm text-[#91a0b7]">
@@ -727,5 +754,25 @@ const Home = () => {
     </div>
   );
 };
+
+function MessageLoadingState() {
+  return (
+    <div className="message-loading-state" role="status" aria-label="Loading messages">
+      <div className="message-skeleton-row is-received">
+        <span className="skeleton-shimmer message-skeleton-bubble short" />
+      </div>
+      <div className="message-skeleton-row is-sent">
+        <span className="skeleton-shimmer message-skeleton-bubble medium" />
+      </div>
+      <div className="message-skeleton-row is-received">
+        <span className="skeleton-shimmer message-skeleton-bubble long" />
+      </div>
+      <div className="message-skeleton-row is-sent">
+        <span className="skeleton-shimmer message-skeleton-bubble short" />
+      </div>
+      <span className="sr-only">Loading messages...</span>
+    </div>
+  );
+}
 
 export default Home;
