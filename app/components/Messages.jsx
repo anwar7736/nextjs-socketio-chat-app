@@ -488,7 +488,7 @@ const Messages = () => {
                   {conversationUser?.is_group === 1 ? sender?.name : conversationUser?.nickname || sender?.name}
                 </div>
               )}
-              <div className={`flex items-end gap-2 ${mine ? "justify-end" : ""}`}>
+              <div className={`flex items-end gap-2 ${mine ? "justify-end" : ""} ${reactions.length ? "pb-4" : ""}`}>
                 {!mine && (
                   <img
                     src={getImageURL(sender?.photo)}
@@ -544,7 +544,15 @@ const Messages = () => {
                         <button
                           key={emoji}
                           type="button"
-                          onClick={() => {
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const ownReaction = reactions.find(
+                              (reaction) => reaction.user_id === user?._id && reaction.emoji === emoji
+                            );
+                            if (ownReaction) {
+                              applyReaction(data, emoji);
+                              return;
+                            }
                             setReactionDetailsFor(data?._id);
                             setReactionFilter(emoji);
                           }}
