@@ -396,9 +396,11 @@ const Home = () => {
       );
     };
     window.addEventListener("chat:refresh-conversations", refreshConversations);
+    window.addEventListener("chat:refresh-call-logs", refreshConversations);
     return () => {
       clearTimeout(conversationRefreshTimerRef.current);
       window.removeEventListener("chat:refresh-conversations", refreshConversations);
+      window.removeEventListener("chat:refresh-call-logs", refreshConversations);
     };
   }, []);
 

@@ -139,14 +139,19 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
       ) : (
         visibleUsers.length > 0 ? visibleUsers.map((contact) => {
           const isActive = activeUsers.includes(String(contact?._id));
-          const mine = contact?.last_message_sender_id === user?._id;
-          const preview = contact?.last_message || (
+          const isCallPreview = contact?.last_activity_kind === "call";
+          const isMissedCall = isCallPreview &&
+            ["no-answer", "declined"].includes(contact?.last_call_status);
+          const mine = !isCallPreview && contact?.last_message_sender_id === user?._id;
+          const preview = isCallPreview
+            ? `${isMissedCall ? "Missed " : ""}${contact?.last_call_is_video ? "Video call" : "Voice call"}`
+            : contact?.last_message || (
             contact?.last_message_type === "image" ? "📷 Photo"
               : contact?.last_message_type === "audio" ? "🎤 Voice message"
                 : contact?.last_message_type === "video" ? "🎥 Video"
                   : contact?.last_message_attachment ? `📎 ${contact.last_message_attachment}`
                     : ""
-          );
+            );
           const preferenceKey = `${contact?.is_group ? "group" : "user"}:${contact?._id}`;
           return (
             <div
@@ -171,7 +176,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                     )}
                   </div>
                   {preview && (
-                    <p className="mt-1 flex items-center gap-1 truncate text-xs text-[#c7d2e3]">
+                    <p className={`mt-1 flex items-center gap-1 truncate text-xs ${isMissedCall ? "text-rose-300" : "text-[#c7d2e3]"}`}>
                       {mine && (contact?.last_message_status > 0
                         ? <MdDoneAll className="shrink-0 text-indigo-300" aria-label="Seen" />
                         : <MdDone className="shrink-0 text-[#91a0b7]" aria-label="Sent, not seen" />)}

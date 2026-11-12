@@ -4,13 +4,14 @@ import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
+import { callLogSchema } from "@/app/models/callLogModel";
 import { getSessionUserId } from "@/app/lib/session";
 
 export async function GET(request) {
     const userId = await getSessionUserId(request);
     const queryParams = request.nextUrl.searchParams;
     const auth_id = queryParams.get('auth_id');
-    const search = (queryParams.get('search') || '').slice(0, 100);
+    const search = (queryParams.get('search') || '').trim().slice(0, 100);
     if (!userId || (auth_id && auth_id !== userId)) {
         return NextResponse.json({ success: false, message: 'Unauthorized.' }, { status: 401 });
     }
@@ -214,6 +215,8 @@ export async function GET(request) {
     const directActivity = new Map(
         directConversations.map((item) => [String(item._id), item.last_activity])
     );
+    const conversationKey = (id, isGroup) =>
+        `${Number(isGroup) === 1 ? 1 : 0}:${String(id)}`;
     const recentLogs = groupIds.length || data.length
         ? await messageLogSchema.aggregate([
             {
@@ -256,6 +259,30 @@ export async function GET(request) {
             },
         ])
         : [];
+    const recentCalls = data.length
+        ? await callLogSchema.aggregate([
+            {
+                $match: {
+                    participants: authObjectId,
+                    conversationId: { $in: data.map((item) => item._id) },
+                },
+            },
+            { $sort: { startedAt: -1, _id: -1 } },
+            {
+                $group: {
+                    _id: { conversationId: "$conversationId", isGroup: "$isGroup" },
+                    callerId: { $first: "$callerId" },
+                    isVideo: { $first: "$isVideo" },
+                    status: { $first: "$status" },
+                    startedAt: { $first: "$startedAt" },
+                },
+            },
+        ])
+        : [];
+    const recentCallsByConversation = new Map(recentCalls.map((item) => [
+        conversationKey(item._id.conversationId, item._id.isGroup),
+        item,
+    ]));
     const latestMessageIds = recentLogs
         .filter((item) => item.group_id)
         .map((item) => item.message_id);
@@ -271,7 +298,10 @@ export async function GET(request) {
         ])
         : [];
     const groupSeenByMessage = new Map(groupSeenCounts.map((item) => [String(item._id), item.count]));
-    const recentByConversation = new Map(recentLogs.map((item) => [String(item._id), item]));
+    const recentByConversation = new Map(recentLogs.map((item) => [
+        conversationKey(item._id, Boolean(item.group_id)),
+        item,
+    ]));
     const blockedByUsers = data.length
         ? await userSchema.find({
             _id: { $in: data.filter((item) => Number(item.is_group) === 0).map((item) => item._id) },
@@ -282,7 +312,11 @@ export async function GET(request) {
     const archivedIds = new Set((currentUser?.archivedConversations || []).map(String));
     const blockedIds = new Set((currentUser?.blockedUsers || []).map(String));
     const visibleConversations = data
-        .filter((item) => Number(item.is_group) === 1 || directActivity.has(String(item._id)));
+        .filter((item) =>
+            Number(item.is_group) === 1 ||
+            directActivity.has(String(item._id)) ||
+            Boolean(search)
+        );
     const directIds = visibleConversations
         .filter((item) => Number(item.is_group) === 0)
         .map((item) => item._id);
@@ -296,10 +330,17 @@ export async function GET(request) {
     const withNicknames = visibleConversations
         .map((item) => {
             const conversationId = String(item._id);
-            const latest = recentByConversation.get(conversationId);
+            const latest = recentByConversation.get(conversationKey(item._id, item.is_group));
+            const latestCall = recentCallsByConversation.get(conversationKey(item._id, item.is_group));
+            const callIsLatest = latestCall && (
+                !latest ||
+                new Date(latestCall.startedAt).getTime() >= new Date(latest.createdAt).getTime()
+            );
             return {
                 ...item,
-                last_activity: latest?.createdAt || directActivity.get(conversationId) || item.last_activity,
+                last_activity: callIsLatest
+                    ? latestCall.startedAt
+                    : latest?.createdAt || directActivity.get(conversationId) || item.last_activity,
                 ...(Number(item.is_group) === 0 ? {
                     nickname: nicknames[String(item._id)] || "",
                     partnerNickname: partnerNicknames.get(conversationId) || "",
@@ -307,7 +348,14 @@ export async function GET(request) {
                 archived: archivedIds.has(String(item._id)),
                 blocked: blockedIds.has(String(item._id)),
                 blockedByPartner: blockedByIds.has(String(item._id)),
-                ...(latest ? {
+                ...(callIsLatest ? {
+                    last_activity_kind: "call",
+                    last_call_caller_id: String(latestCall.callerId),
+                    last_call_is_video: latestCall.isVideo,
+                    last_call_status: latestCall.status,
+                    last_message: "",
+                } : latest ? {
+                    last_activity_kind: "message",
                     last_activity: latest.createdAt,
                     last_message: latest.text || "",
                     last_message_type: latest.type || "text",
