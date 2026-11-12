@@ -2591,3 +2591,10 @@ button.nickname-person:hover {
     bottom: calc(78px + env(safe-area-inset-bottom));
   }
 }
+
+/* shown only when a call stays on "Connecting…": where the connection stopped (for troubleshooting) */
+.call-debug {
+  max-width: min(92vw, 520px);
+  margin-top: 8px;
+  border-radius: 10px;
+  background: rgb(0 0 0 / 35

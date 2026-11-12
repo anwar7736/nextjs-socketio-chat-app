@@ -152,6 +152,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [callMinimized, setCallMinimized] = useState(false);
   const [remoteMedia, setRemoteMedia] = useState({});
+  // call diagnostics: shown under the status when a call stays on "Connecting…" (to see where it stops)
+  const diagRef = useRef(null);
+  const [, setDiagTick] = useState(0);
+  const diag = (update) => {
+    if (!diagRef.current) return;
+    update(diagRef.current);
+    setDiagTick((tick) => tick + 1);
+  };
   const [audioDevices, setAudioDevices] = useState([]);
   const [audioInputId, setAudioInputId] = useState("");
   const [audioOutputId, setAudioOutputId] = useState("");
@@ -413,7 +421,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     // plain addTrack, as in the version that worked: changing sender parameters before the call is
     // negotiated is handled differently by Safari/iPhone and can leave the call silent
     localStreamRef.current?.getTracks().forEach((track) => peer.addTrack(track, localStreamRef.current));
+    diagRef.current = {
+      sock: socket.id, offer: "-", answer: "-", local: { host: 0, srflx: 0, relay: 0, prflx: 0 }, remote: 0,
+      ice: peer.iceConnectionState, gather: peer.iceGatheringState, conn: peer.connectionState, err: "",
+      tracks: (localStreamRef.current?.getTracks() || []).map((t) => t.kind[0] + (t.readyState === "live" ? "" : "!")).join(""),
+      servers: (iceServersRef.current || []).map((s) => [].concat(s.urls).map((u) => u.split(":")[0]).join("+")).join(","),
+    };
+    peer.addEventListener("icegatheringstatechange", () => diag((d) => { d.gather = peer.iceGatheringState; }));
+    peer.addEventListener("iceconnectionstatechange", () => diag((d) => { d.ice = peer.iceConnectionState; }));
+    peer.addEventListener("connectionstatechange", () => diag((d) => { d.conn = peer.connectionState; }));
+    peer.addEventListener("icecandidateerror", (event) => diag((d) => { d.err = `ice ${event.errorCode} ${(event.url || "").split(":")[0]}`; }));
     peer.onicecandidate = (event) => {
+      if (event.candidate?.type) diag((d) => { d.local[event.candidate.type] = (d.local[event.candidate.type] || 0) + 1; });
       if (event.candidate) {
         socket.emit("call:signal", { callId, to: peerId, signal: { candidate: event.candidate.toJSON() } });
       }
@@ -933,7 +952,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           const offer = await peer.createOffer();
           await peer.setLocalDescription(offer);
           socket.emit("call:signal", { callId, to: userId, signal: { description: peer.localDescription.toJSON() } });
-        } catch {
+          diag((d) => { d.offer = "sent"; });
+        } catch (error) {
+          diag((d) => { d.err = `offer: ${error?.message || error}`; });
           toast.error("Unable to connect a call participant.");
         }
       }
@@ -943,6 +964,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       try {
         const peer = makePeer(from, callId);
         if (signal.candidate) {
+          diag((d) => { d.remote += 1; });
           if (peer.remoteDescription) {
             await peer.addIceCandidate(new RTCIceCandidate(signal.candidate));
           } else {
@@ -951,16 +973,20 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           return;
         }
         if (signal.description?.type === "offer") {
+          diag((d) => { d.offer = "recv"; });
           await peer.setRemoteDescription(new RTCSessionDescription(signal.description));
           await flushCandidates(from, peer);
           const answer = await peer.createAnswer();
           await peer.setLocalDescription(answer);
           socket.emit("call:signal", { callId, to: from, signal: { description: peer.localDescription.toJSON() } });
+          diag((d) => { d.answer = "sent"; });
         } else if (signal.description?.type === "answer") {
+          diag((d) => { d.answer = "recv"; });
           await peer.setRemoteDescription(new RTCSessionDescription(signal.description));
           await flushCandidates(from, peer);
         }
-      } catch {
+      } catch (error) {
+        diag((d) => { d.err = `signal: ${error?.message || error}`; });
         toast.error("Unable to establish this call connection.");
       }
     };
@@ -1123,6 +1149,25 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const incomingName = incomingPerson?.nickname || incoming?.callerName;
   const showVideoStage = call?.isVideo && remoteEntries.length > 0;
   const toggleVideoLayout = () => setLocalVideoExpanded((expanded) => !expanded);
+  // only the small card swaps the videos (like WhatsApp); a tap on the big full-screen video does nothing
+  const swapProps = (isSmallCard, label) => isSmallCard
+    ? {
+      role: "button",
+      tabIndex: 0,
+      "aria-label": label,
+      title: "Swap video cards",
+      onClick: (event) => {
+        event.stopPropagation();
+        toggleVideoLayout();
+      },
+      onKeyDown: (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          toggleVideoLayout();
+        }
+      },
+    }
+    : {};
 
   return (
     <>
@@ -1200,17 +1245,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               {showVideoStage && (
                 <div
                   className={`call-stage ${remoteEntries.length > 1 ? "is-grid" : ""} ${localVideoExpanded ? "is-inset" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label="Swap video cards"
-                  title="Swap video cards"
-                  onClick={toggleVideoLayout}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      toggleVideoLayout();
-                    }
-                  }}
+                  {...swapProps(localVideoExpanded, "Show partner video full screen")}
                 >
                   {remoteEntries.map(([id, stream]) => (
                     <CallVideo
@@ -1230,17 +1265,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                   id="local-call-stream"
                   ref={localVideoRef}
                   className={`call-self-view ${facingMode === "user" ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded ? "is-expanded" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={localVideoExpanded ? "Show partner video full screen" : "Show your video full screen"}
-                  title="Swap video cards"
-                  onClick={toggleVideoLayout}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      toggleVideoLayout();
-                    }
-                  }}
+                  {...swapProps(!localVideoExpanded, "Show your video full screen")}
                   autoPlay
                   playsInline
                   muted
@@ -1292,6 +1317,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     <p className="call-status">{statusText}</p>
                     {Object.entries(remoteMedia).some(([, state]) => state.muted) && !showVideoStage && <p className="call-sub">Muted</p>}
                     {call.connectedAt && !call.mediaConnected && <p className="call-sub">Connecting audio…</p>}
+                    {call.connectedAt && !call.mediaConnected && elapsedSeconds >= 5 && (
+                      <p className="call-debug">
+                        {diagRef.current
+                          ? `ice ${diagRef.current.ice} · conn ${diagRef.current.conn} · gather ${diagRef.current.gather} · me h${diagRef.current.local.host}/s${diagRef.current.local.srflx}/r${diagRef.current.local.relay} · them ${diagRef.current.remote} · offer ${diagRef.current.offer} · answer ${diagRef.current.answer} · tracks ${diagRef.current.tracks} · ${diagRef.current.servers}${socket.id !== diagRef.current.sock ? " · SOCKET CHANGED" : ""}${socket.connected ? "" : " · SOCKET OFFLINE"}${diagRef.current.err ? " · " + diagRef.current.err : ""}`
+                          : `no peer yet · socket ${socket.connected ? "on" : "OFF"}`}
+                      </p>
+                    )}
                   </div>
 
                   <div className={`call-actions ${call.isVideo ? "is-video" : ""}`}>
