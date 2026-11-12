@@ -740,8 +740,8 @@ form:has(> .print-container),
 .call-log-bubble {
   display: flex;
   align-items: center;
-  gap: 11px;
-  width: min(100%, 340px);
+  gap: 10px;
+  width: min(100%, 280px);
   min-height: 66px;
   border: 1px solid rgb(148 163 184 / 12%);
   border-radius: 18px;
@@ -781,8 +781,22 @@ form:has(> .print-container),
 }
 
 .call-log-row.is-missed .call-log-icon {
-  background: rgb(244 63 94 / 16%);
-  color: #fb7185;
+  background: rgb(239 68 68 / 16%);
+  color: #ef4444;
+}
+
+.call-log-row.is-missed .call-log-bubble {
+  border-color: rgb(239 68 68 / 18%);
+  background: #2b2028;
+}
+
+.call-log-row.is-missed .call-log-bubble:hover {
+  background: #38232c;
+}
+
+.call-log-row.is-missed .call-log-copy strong,
+.call-log-row.is-missed .call-log-copy > span {
+  color: #f87171;
 }
 
 .call-log-copy {
@@ -803,10 +817,6 @@ form:has(> .print-container),
 .call-log-copy > span {
   color: #a7b2c4;
   font-size: 12px;
-}
-
-.call-log-row.is-missed .call-log-copy > span {
-  color: #fda4af;
 }
 
 .call-log-bubble time {
