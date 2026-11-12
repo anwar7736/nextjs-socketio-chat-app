@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import ValidationError from "./ValidationError";
 
 export default function TwoFactorSettings() {

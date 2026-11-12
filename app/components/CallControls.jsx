@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { FaVideo } from "react-icons/fa";
-import { FiArrowLeft, FiBluetooth, FiCheck, FiClock, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiSmartphone, FiVideo, FiVideoOff, FiVolume2, FiX } from "react-icons/fi";
+import { FiArrowLeft, FiBluetooth, FiCheck, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiSmartphone, FiVideo, FiVideoOff, FiVolume2 } from "react-icons/fi";
 import { MdAddIcCall } from "react-icons/md";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import { UserListContext } from "../contexts/UserListContext";
 import { getImageURL, socket_connection } from "../helpers/helper";
 
@@ -128,21 +129,25 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [busy, setBusy] = useState(false);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
   const incomingRef = useRef(null);
+  const startCallRef = useRef(null);
   const peersRef = useRef(new Map());
   const pendingCandidatesRef = useRef(new Map());
   const callRef = useRef(null);
+  const callSetupRef = useRef(null);
   const endTimerRef = useRef(null);
   const iceServersRef = useRef([{ urls: "stun:stun.l.google.com:19302" }]);
+  const iceServersLoadedAtRef = useRef(0);
+  const iceServersRequestRef = useRef(null);
   const currentUserIdRef = useRef(currentUser?._id);
   currentUserIdRef.current = currentUser?._id;
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
+  const [localVideoExpanded, setLocalVideoExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [callMinimized, setCallMinimized] = useState(false);
-  const [callHistoryOpen, setCallHistoryOpen] = useState(false);
-  const [callHistory, setCallHistory] = useState([]);
   const [remoteMedia, setRemoteMedia] = useState({});
   const [audioDevices, setAudioDevices] = useState([]);
   const [audioInputId, setAudioInputId] = useState("");
@@ -150,16 +155,36 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [audioRoute, setAudioRoute] = useState("speaker");
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const audioMenuRef = useRef(null);
+  const [portalRoot, setPortalRoot] = useState(null);
 
-  const personFor = useCallback((id) => (Array.isArray(users) ? users.find((item) => item?._id === id) : null), [users]);
+  useEffect(() => {
+    setPortalRoot(document.body);
+  }, []);
+
+  const personFor = useCallback((id) => (Array.isArray(users)
+    ? users.find((item) => String(item?._id) === String(id))
+    : null), [users]);
 
   const loadIceServers = useCallback(async () => {
+    if (Date.now() - iceServersLoadedAtRef.current < 30 * 60 * 1000) return;
+    if (iceServersRequestRef.current) return iceServersRequestRef.current;
+    const request = (async () => {
+      try {
+        const response = await fetch("/api/calls/ice-servers");
+        const result = await response.json();
+        if (response.ok && result.success && Array.isArray(result.iceServers) && result.iceServers.length) {
+          iceServersRef.current = result.iceServers;
+          iceServersLoadedAtRef.current = Date.now();
+        }
+      } catch {
+        // keep the public STUN default
+      }
+    })();
+    iceServersRequestRef.current = request;
     try {
-      const response = await fetch("/api/calls/ice-servers");
-      const result = await response.json();
-      if (response.ok && result.success && Array.isArray(result.iceServers)) iceServersRef.current = result.iceServers;
-    } catch {
-      // keep the public STUN default
+      await request;
+    } finally {
+      if (iceServersRequestRef.current === request) iceServersRequestRef.current = null;
     }
   }, []);
 
@@ -171,7 +196,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const stopCall = useCallback((notify = true) => {
     const active = callRef.current;
-    if (notify && active) {
+    const setup = callSetupRef.current;
+    if (setup?.callId === active?.callId) {
+      setup.cancel();
+      callSetupRef.current = null;
+    }
+    if (notify && active?.inviteSent) {
       socket.emit("call:end", { callId: active.callId });
       updateCallLog(active.callId, "ended");
     }
@@ -182,10 +212,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     localStreamRef.current = null;
     callRef.current = null;
     setCall(null);
+    setBusy(false);
     setRemoteStreams({});
     setMuted(false);
     setCameraOff(false);
     setFacingMode("user");
+    setLocalVideoExpanded(false);
     setCallMinimized(false);
     setRemoteMedia({});
   }, []);
@@ -199,26 +231,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success) throw new Error(result.message || "Unable to update call history.");
+      window.dispatchEvent(new Event("chat:refresh-call-logs"));
+      return true;
     } catch (error) {
       console.error("Unable to save call history:", error);
       toast.error(error.message || "Unable to save call history.");
+      return false;
     }
   };
 
-  const loadCallHistory = useCallback(async () => {
-    try {
-      const response = await fetch("/api/calls/history");
-      const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.message || "Unable to load call history.");
-      setCallHistory(result.data || []);
-    } catch (error) {
-      console.error("Unable to load call history:", error);
-    }
+  const loadCallHistory = useCallback(() => {
+    window.dispatchEvent(new Event("chat:refresh-call-logs"));
   }, []);
-
-  useEffect(() => {
-    if (conversation?._id) loadCallHistory();
-  }, [conversation?._id, loadCallHistory]);
 
   useEffect(() => {
     if (!call) return;
@@ -381,8 +405,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const makePeer = useCallback((peerId, callId) => {
     const existing = peersRef.current.get(peerId);
     if (existing) return existing;
-    const peer = new RTCPeerConnection({ iceServers: iceServersRef.current });
-    localStreamRef.current?.getTracks().forEach((track) => peer.addTrack(track, localStreamRef.current));
+    const peer = new RTCPeerConnection({ iceServers: iceServersRef.current, iceCandidatePoolSize: 2 });
+    localStreamRef.current?.getTracks().forEach((track) => {
+      const sender = peer.addTrack(track, localStreamRef.current);
+      const parameters = sender.getParameters();
+      if (parameters.encodings?.length) {
+        parameters.encodings[0].priority = track.kind === "audio" ? "high" : "medium";
+      }
+      if (track.kind === "video") parameters.degradationPreference = "maintain-framerate";
+      sender.setParameters(parameters).catch((error) => {
+        console.debug("Unable to set call media priority:", error);
+      });
+    });
     peer.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit("call:signal", { callId, to: peerId, signal: { candidate: event.candidate.toJSON() } });
@@ -503,7 +537,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   }, []);
 
   const startCall = async (video) => {
-    if (!conversation?._id || !currentUser?._id || busy || callRef.current) return;
+    if (!conversation?._id || !currentUser?._id || busy || callRef.current || incomingRef.current) return;
     if (blocked) {
       toast.error("Unblock this contact before calling.");
       return;
@@ -512,7 +546,25 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       toast.error("Not connected. Check your internet connection and try again.");
       return;
     }
+    const activeCall = {
+      callId: crypto.randomUUID(),
+      isVideo: video,
+      isCaller: true,
+      callerId: currentUser._id,
+      callerName: currentUser.name,
+      conversationId: conversation._id,
+      conversationName: conversation.nickname || conversation.name,
+      photo: conversation.photo,
+      isGroup: conversation.is_group === 1,
+      recipients: [],
+      status: "connecting",
+      startedAt: Date.now(),
+    };
+    callRef.current = activeCall;
+    setCall(activeCall);
     setBusy(true);
+    const iceServersReady = loadIceServers();
+    let callSetup = null;
     try {
       const accessResponse = await fetch("/api/conversations/access", {
         method: "POST",
@@ -527,6 +579,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       if (!accessResponse.ok || !accessResult.success || !accessResult.allowed) {
         throw new Error(accessResult.message || "This conversation cannot receive calls.");
       }
+      if (callRef.current?.callId !== activeCall.callId) return;
 
       let recipients;
       if (conversation.is_group === 1) {
@@ -537,77 +590,143 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       } else {
         recipients = [String(conversation._id)];
       }
+      if (callRef.current?.callId !== activeCall.callId) return;
       if (!recipients.length) throw new Error("There are no other people to call.");
       if (recipients.length > 7) throw new Error("Group calls currently support up to 8 participants.");
 
-      const stream = await openMedia(video);
-      await loadIceServers();
-      localStreamRef.current = stream;
-      const activeCall = {
-        callId: crypto.randomUUID(),
-        isVideo: video,
-        isCaller: true,
-        callerId: currentUser._id,
-        callerName: currentUser.name,
-        conversationId: conversation._id,
-        conversationName: conversation.name,
-        photo: conversation.photo,
-        isGroup: conversation.is_group === 1,
-        recipients,
-        status: "calling",
-        startedAt: Date.now(),
+      callSetup = {
+        callId: activeCall.callId,
+        cancelled: false,
+        logSaved: false,
+        logPromise: null,
+        cancel() {
+          this.cancelled = true;
+          if (this.logSaved) {
+            this.logSaved = false;
+            void updateCallLog(this.callId, "ended");
+          }
+        },
       };
-      await updateCallLog(activeCall.callId, "start", {
+      callSetupRef.current = callSetup;
+      callSetup.logPromise = updateCallLog(callSetup.callId, "start", {
         callerId: activeCall.callerId,
         conversationId: activeCall.conversationId,
         isGroup: activeCall.isGroup,
         isVideo: activeCall.isVideo,
         participants: [activeCall.callerId, ...recipients],
+      }).then(async (saved) => {
+        callSetup.logSaved = saved;
+        if (callSetup.cancelled && saved) {
+          callSetup.logSaved = false;
+          await updateCallLog(callSetup.callId, "ended");
+          return false;
+        }
+        return saved;
       });
-      await loadCallHistory();
-      callRef.current = activeCall;
-      setCall(activeCall);
+
+      const stream = await openMedia(video);
+      if (callRef.current?.callId !== activeCall.callId) {
+        stream.getTracks().forEach((track) => track.stop());
+        await callSetup.logPromise;
+        return;
+      }
+      localStreamRef.current = stream;
+      await Promise.all([iceServersReady, callSetup.logPromise]);
+      if (callRef.current?.callId !== activeCall.callId) {
+        stream.getTracks().forEach((track) => track.stop());
+        if (localStreamRef.current === stream) localStreamRef.current = null;
+        return;
+      }
+      const callingCall = {
+        ...activeCall,
+        recipients,
+        status: "calling",
+      };
+      callRef.current = callingCall;
+      setCall(callingCall);
+      const invitedCall = { ...callingCall, inviteSent: true };
+      callRef.current = invitedCall;
+      setCall(invitedCall);
+      if (callSetupRef.current === callSetup) callSetupRef.current = null;
       socket.emit("call:invite", {
-        callId: activeCall.callId,
-        isVideo: activeCall.isVideo,
-        callerName: activeCall.callerName,
-        conversationName: activeCall.conversationName,
-        conversationId: activeCall.conversationId,
-        isGroup: activeCall.isGroup,
+        callId: invitedCall.callId,
+        isVideo: invitedCall.isVideo,
+        callerName: invitedCall.callerName,
+        conversationName: invitedCall.conversationName,
+        conversationId: invitedCall.conversationId,
+        isGroup: invitedCall.isGroup,
         recipients,
       });
     } catch (error) {
-      toast.error(error.message || "Unable to start the call.");
-      stopCall(false);
+      if (callSetup) {
+        callSetup.cancel();
+        await callSetup.logPromise;
+        if (callSetupRef.current === callSetup) callSetupRef.current = null;
+      }
+      if (callRef.current?.callId === activeCall.callId) {
+        toast.error(error.message || "Unable to start the call.");
+        stopCall(false);
+      }
     } finally {
       setBusy(false);
     }
   };
+  startCallRef.current = startCall;
+
+  useEffect(() => {
+    const onCallLogAction = (event) => {
+      const { callId, isVideo } = event.detail || {};
+      const activeCall = callRef.current;
+      if (activeCall) {
+        if (activeCall.callId === callId) setCallMinimized(false);
+        else toast.info("End the current call before starting another.");
+        return;
+      }
+      if (incomingRef.current) {
+        toast.info("Answer or decline the incoming call before calling back.");
+        return;
+      }
+      if (conversation?._id) startCallRef.current?.(Boolean(isVideo));
+    };
+    window.addEventListener("chat:call-log-action", onCallLogAction);
+    return () => window.removeEventListener("chat:call-log-action", onCallLogAction);
+  }, [conversation?._id]);
 
   const acceptCall = async () => {
-    if (!incoming) return;
+    if (!incoming || busy || callRef.current) return;
+    const acceptingCall = incoming;
     setBusy(true);
     try {
-      const stream = await openMedia(incoming.isVideo);
+      const stream = await openMedia(acceptingCall.isVideo);
+      if (incomingRef.current?.callId !== acceptingCall.callId) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       await loadIceServers();
+      if (incomingRef.current?.callId !== acceptingCall.callId) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       localStreamRef.current = stream;
-      const caller = personFor(incoming.callerId);
+      const caller = personFor(acceptingCall.callerId);
       const activeCall = {
-        ...incoming,
+        ...acceptingCall,
         isCaller: false,
         photo: caller?.photo,
         status: "connecting",
         startedAt: Date.now(),
         connectedAt: Date.now(),
+        inviteSent: true,
       };
       callRef.current = activeCall;
       setCall(activeCall);
       incomingRef.current = null;
       setIncoming(null);
-      socket.emit("call:accept", { callId: incoming.callId, callerId: incoming.callerId });
+      socket.emit("call:accept", { callId: acceptingCall.callId, callerId: acceptingCall.callerId });
     } catch (error) {
+      if (incomingRef.current?.callId !== acceptingCall.callId) return;
       toast.error(error.message || "Unable to join the call.");
-      socket.emit("call:reject", { callId: incoming.callId, callerId: incoming.callerId });
+      socket.emit("call:reject", { callId: acceptingCall.callId, callerId: acceptingCall.callerId });
       incomingRef.current = null;
       setIncoming(null);
     } finally {
@@ -626,8 +745,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const active = callRef.current;
     if (!active) return;
     const connectedFor = active.connectedAt ? Math.floor((Date.now() - active.connectedAt) / 1000) : null;
-    loadCallHistory();
     stopCall();
+    loadCallHistory();
     showEnded(connectedFor != null ? "Call ended" : "Call cancelled", connectedFor != null ? formatTime(connectedFor) : "", {
       name: active.isGroup || active.isCaller ? active.conversationName : active.callerName,
       photo: active.photo,
@@ -678,6 +797,55 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
   }, [incoming]);
 
+  const notificationCallId = call?.callId;
+  useEffect(() => {
+    if (!notificationCallId || !("serviceWorker" in navigator) || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    let active = true;
+    const tag = `active-call-${notificationCallId}`;
+    const syncCallNotification = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        if (!active) return;
+        const existing = await registration.getNotifications({ tag });
+        if (document.visibilityState === "visible") {
+          existing.forEach((notification) => notification.close());
+          return;
+        }
+        const activeCall = callRef.current;
+        if (!activeCall || activeCall.callId !== notificationCallId) return;
+        const name = activeCall.isGroup || activeCall.isCaller ? activeCall.conversationName : activeCall.callerName;
+        const status = activeCall.connectedAt
+          ? formatTime(Math.floor((Date.now() - activeCall.connectedAt) / 1000))
+          : activeCall.status === "ringing" ? "Ringing" : activeCall.status === "connecting" ? "Connecting" : "Calling";
+        await registration.showNotification(name || "Call in progress", {
+          body: `${activeCall.isVideo ? "Video" : "Voice"} call · ${status}`,
+          icon: "/icons/icon.svg",
+          badge: "/icons/icon.svg",
+          silent: true,
+          tag,
+          requireInteraction: true,
+          timestamp: Date.now(),
+          data: { url: "/" },
+        });
+      } catch (error) {
+        console.error("Unable to show the ongoing call notification:", error);
+      }
+    };
+    const closeCallNotification = () => {
+      navigator.serviceWorker.ready
+        .then((registration) => registration.getNotifications({ tag }))
+        .then((notifications) => notifications.forEach((notification) => notification.close()))
+        .catch((error) => console.error("Unable to close the ongoing call notification:", error));
+    };
+    syncCallNotification();
+    document.addEventListener("visibilitychange", syncCallNotification);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", syncCallNotification);
+      closeCallNotification();
+    };
+  }, [notificationCallId]);
+
   /* ---------- timer: calling / ringing / in call ---------- */
   useEffect(() => {
     const timerStartedAt = call?.connectedAt;
@@ -696,10 +864,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
     const onInvite = async (invite) => {
-      if (callRef.current) {
+      if (callRef.current || incomingRef.current) {
         socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
         return;
       }
+      loadIceServers();
+      const pendingIncoming = { ...invite, startedAt: Date.now() };
+      incomingRef.current = pendingIncoming;
       try {
         const response = await fetch("/api/conversations/access", {
           method: "POST",
@@ -711,18 +882,23 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           }),
         });
         const result = await response.json().catch(() => ({}));
+        if (incomingRef.current?.callId !== invite.callId) return;
         if (!response.ok || !result.success || !result.allowed || callRef.current) {
           socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
+          incomingRef.current = null;
           return;
         }
       } catch (error) {
         console.error("Unable to verify incoming call access:", error);
         socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
+        if (incomingRef.current?.callId === invite.callId) incomingRef.current = null;
         return;
       }
-      const incomingCall = { ...invite, startedAt: Date.now() };
+      if (incomingRef.current?.callId !== invite.callId) return;
+      const incomingCall = pendingIncoming;
       incomingRef.current = incomingCall;
       setIncoming(incomingCall);
+      loadCallHistory();
     };
     const onParticipant = async ({ callId, userId }) => {
       const active = callRef.current;
@@ -770,7 +946,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       }
     };
     const endInfo = (active) => ({
-      name: active.isGroup || active.isCaller ? active.conversationName : active.callerName,
+      name: active.isGroup || active.isCaller
+        ? active.conversationName
+        : personFor(active.callerId)?.nickname || active.callerName,
       photo: active.photo,
     });
     const onEnded = ({ callId, reason }) => {
@@ -792,9 +970,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         incomingRef.current = null;
         setIncoming(null);
         if (reason !== "answered-elsewhere" && reason !== "declined-elsewhere") {
-          toast.info(`Missed call from ${missedIncoming.callerName || "someone"}.`);
+          const missedCallerName = personFor(missedIncoming.callerId)?.nickname || missedIncoming.callerName || "someone";
+          toast.info(`Missed call from ${missedCallerName}.`);
           showEnded("Missed call", "", {
-            name: missedIncoming.callerName || "Someone",
+            name: missedCallerName,
             photo: personFor(missedIncoming.callerId)?.photo,
           }, true);
         }
@@ -835,7 +1014,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         showEnded("You are on another call", "", endInfo(active), true);
         return;
       }
-      if (active.isGroup) toast.info(`${personFor(userId)?.name || "A participant"} is on another call.`);
+      if (active.isGroup) toast.info(`${personFor(userId)?.nickname || personFor(userId)?.name || "A participant"} is on another call.`);
       // one-to-one: call:unavailable with reason "busy" follows
     };
     const onUnavailable = ({ callId, reason }) => {
@@ -889,11 +1068,24 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   }, [stopCall]);
 
   useEffect(() => {
-    if (call && localStreamRef.current) {
-      const element = document.getElementById("local-call-stream");
-      if (element) element.srcObject = localStreamRef.current;
-    }
-  }, [call, facingMode]);
+    const element = localVideoRef.current;
+    const stream = localStreamRef.current;
+    if (!call?.isVideo || !element || !stream) return;
+    element.srcObject = stream;
+    const resumePlayback = () => {
+      if (callMinimized || document.visibilityState === "hidden") return;
+      element.play().catch((error) => {
+        if (error?.name !== "NotAllowedError") console.error("Unable to resume local call video:", error);
+      });
+    };
+    resumePlayback();
+    document.addEventListener("visibilitychange", resumePlayback);
+    window.addEventListener("pageshow", resumePlayback);
+    return () => {
+      document.removeEventListener("visibilitychange", resumePlayback);
+      window.removeEventListener("pageshow", resumePlayback);
+    };
+  }, [call, callMinimized, facingMode]);
 
   const remoteEntries = Object.entries(remoteStreams);
   const statusText = call
@@ -901,60 +1093,25 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       ? formatTime(elapsedSeconds)
       : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" ? "Connecting" : "Calling"}…`
     : "";
-  const callName = call ? (call.isGroup || call.isCaller ? call.conversationName : call.callerName) : "";
+  const callName = call
+    ? call.isGroup || call.isCaller
+      ? call.conversationName
+      : personFor(call.callerId)?.nickname || call.callerName
+    : "";
   const incomingPerson = incoming ? personFor(incoming.callerId) : null;
+  const incomingName = incomingPerson?.nickname || incoming?.callerName;
   const showVideoStage = call?.isVideo && remoteEntries.length > 0;
-  const returnToCall = (entry) => {
-    setCallHistoryOpen(false);
-    if (callRef.current?.callId === entry.callId) {
-      setCallMinimized(false);
-      return;
-    }
-    if (conversation?._id === String(entry.conversationId) && !callRef.current) startCall(Boolean(entry.isVideo));
-  };
-  const visibleCallHistory = callHistory.filter((entry) => String(entry.conversationId) === String(conversation?._id));
+  const toggleVideoLayout = () => setLocalVideoExpanded((expanded) => !expanded);
 
   return (
     <>
-      {showButtons && (
-        <div className="relative hidden">
-          <button
-            type="button"
-            className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248]"
-            title="Call history"
-            aria-label="Call history"
-            aria-expanded={callHistoryOpen}
-            onClick={() => setCallHistoryOpen((open) => !open)}
-          >
-            <FiClock size={19} />
-          </button>
-          {callHistoryOpen && (
-            <div className="call-history-popover" role="dialog" aria-label="Call history">
-              <div className="flex items-center justify-between border-b border-[#263248] px-3 py-2">
-                <strong className="text-sm">Recent calls</strong>
-                <button type="button" aria-label="Close call history" onClick={() => setCallHistoryOpen(false)}><FiX /></button>
-              </div>
-              {visibleCallHistory.length ? visibleCallHistory.map((entry) => (
-                <button key={entry.callId} type="button" className="call-history-entry" onClick={() => returnToCall(entry)}>
-                  <img src={getImageURL(conversation?.photo)} alt="" />
-                  <span className="min-w-0 flex-1 text-left">
-                    <span className="block truncate">{entry.isVideo ? "Video call" : "Voice call"}</span>
-                    <span className="block text-xs text-[#91a0b7]">{entry.status === "no-answer" ? "No answer" : entry.status === "declined" ? "Declined" : entry.status === "answered" || entry.status === "ended" ? formatTime(entry.durationSeconds || 0) : "Calling"}</span>
-                  </span>
-                  <span className="text-[11px] text-[#91a0b7]">{new Date(entry.startedAt).toLocaleDateString()}</span>
-                </button>
-              )) : <p className="px-4 py-6 text-center text-sm text-[#91a0b7]">No calls yet</p>}
-            </div>
-          )}
-        </div>
-      )}
       {showButtons && (
         <button
           type="button"
           className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
           title={socketConnected ? "Voice call" : "Connecting…"}
           aria-label="Start voice call"
-          disabled={busy || Boolean(call) || blocked}
+          disabled={busy || Boolean(call || incoming) || blocked}
           onClick={() => startCall(false)}
         >
           <MdAddIcCall size={20} />
@@ -966,198 +1123,295 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
           title={socketConnected ? "Video call" : "Connecting…"}
           aria-label="Start video call"
-          disabled={busy || Boolean(call) || blocked}
+          disabled={busy || Boolean(call || incoming) || blocked}
           onClick={() => startCall(true)}
         >
           <FaVideo size={18} />
         </button>
       )}
 
-      {/* ---------- incoming call ---------- */}
-      {incoming && (
-        <div className="call-screen call-overlay" role="dialog" aria-modal="true" aria-label="Incoming call">
-          <div className="call-hero">
-            <p className="call-kind">{incoming.isVideo ? "Incoming video call" : "Incoming voice call"}</p>
-            <div className="call-avatar is-ringing">
-              <img src={getImageURL(incomingPerson?.photo)} alt="" />
-            </div>
-            <h2 className="call-name">{incoming.callerName}</h2>
-            {incoming.conversationName && incoming.conversationName !== incoming.callerName && (
-              <p className="call-sub">{incoming.conversationName}</p>
-            )}
-            <p className="call-status">Ringing…</p>
-          </div>
-          <div className="call-actions is-incoming">
-            <div className="call-action">
-              <button type="button" className="call-round is-end" onClick={declineCall} aria-label="Decline">
-                <FiPhoneOff />
-              </button>
-              <span>Decline</span>
-            </div>
-            <div className="call-action">
-              <button type="button" className="call-round is-accept" onClick={acceptCall} disabled={busy} aria-label="Accept">
-                {incoming.isVideo ? <FiVideo /> : <FiPhone />}
-              </button>
-              <span>Accept</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ---------- active call ---------- */}
-      {call && callMinimized && (
-        <div className="call-mini-bar">
-          <button type="button" onClick={() => setCallMinimized(false)}>
-            <span className="call-mini-pulse" />
-            {callName || "Call"} · {statusText}
-          </button>
-          <button type="button" className="is-end" onClick={hangUp} aria-label="End call"><FiPhoneOff /></button>
-        </div>
-      )}
-      {call && !callMinimized && (
-        <div className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""}`} role="dialog" aria-modal="true" aria-label="Call">
-          <button type="button" className="call-minimize-button" onClick={() => setCallMinimized(true)} aria-label="Back to conversation" title="Back to conversation">
-            <FiArrowLeft />
-          </button>
-          {showVideoStage && (
-            <div className={`call-stage ${remoteEntries.length > 1 ? "is-grid" : ""}`}>
-              {remoteEntries.map(([id, stream]) => (
-                <CallVideo
-                  key={id}
-                  stream={stream}
-                  label={personFor(id)?.name || (id === conversation?._id ? conversation.name : "Participant")}
-                  photo={personFor(id)?.photo}
-                  muted={remoteMedia[id]?.muted}
-                  cameraOff={remoteMedia[id]?.cameraOff}
-                />
-              ))}
-            </div>
-          )}
-          {!call.isVideo && remoteEntries.map(([id, stream]) => <RemoteAudio key={id} stream={stream} />)}
-
-          <div className={`call-hero ${showVideoStage ? "is-compact" : ""}`}>
-            <p className="call-kind">{call.isVideo ? "Video call" : "Voice call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
-            {!showVideoStage && (
-              <div className={`call-avatar ${call.connectedAt ? "" : "is-ringing"}`}>
-                <img src={getImageURL(call.photo)} alt="" />
+      {portalRoot && createPortal(
+        <>
+          {incoming && (
+            <div className="call-screen call-overlay" role="dialog" aria-modal="true" aria-label="Incoming call">
+              <div className="call-hero">
+                <p className="call-kind">{incoming.isVideo ? "Incoming video call" : "Incoming voice call"}</p>
+                <div className="call-avatar is-ringing">
+                  <img src={getImageURL(incomingPerson?.photo)} alt="" />
+                </div>
+                <h2 className="call-name">{incomingName}</h2>
+                {incoming.conversationName && incoming.conversationName !== incomingName && (
+                  <p className="call-sub">{incoming.conversationName}</p>
+                )}
+                <p className="call-status">Ringing…</p>
               </div>
-            )}
-            <h2 className="call-name">{callName || "Call"}</h2>
-            <p className="call-status">{statusText}</p>
-            {Object.entries(remoteMedia).some(([, state]) => state.muted) && <p className="call-sub">A participant is muted.</p>}
-            {call.connectedAt && remoteEntries.length === 0 && <p className="call-sub">Connecting audio…</p>}
-          </div>
-
-          {call.isVideo && (
-            <video id="local-call-stream" className={`call-self-view ${facingMode === "user" ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""}`} autoPlay playsInline muted />
+              <div className="call-actions is-incoming">
+                <div className="call-action">
+                  <button type="button" className="call-round is-end" onClick={declineCall} aria-label="Decline">
+                    <FiPhoneOff />
+                  </button>
+                  <span>Decline</span>
+                </div>
+                <div className="call-action">
+                  <button type="button" className="call-round is-accept" onClick={acceptCall} disabled={busy} aria-label="Accept">
+                    {incoming.isVideo ? <FiVideo /> : <FiPhone />}
+                  </button>
+                  <span>Accept</span>
+                </div>
+              </div>
+            </div>
           )}
 
-          <div className={`call-actions ${call.isVideo ? "is-video" : ""}`}>
-            <div className="call-action call-audio-action" ref={audioMenuRef}>
-              <button
-                type="button"
-                className={`call-round ${audioMenuOpen || audioRoute !== "speaker" ? "is-on" : ""}`}
-                onClick={() => setAudioMenuOpen((open) => !open)}
-                aria-label="Choose audio output"
-                aria-expanded={audioMenuOpen}
-                aria-haspopup="menu"
-                title="Audio output"
-              >
-                {audioRoute === "bluetooth" ? <FiBluetooth /> : audioRoute === "earpiece" ? <FiSmartphone /> : <FiVolume2 />}
-              </button>
-              <span>Audio</span>
-              {audioMenuOpen && (
-                <div className="call-audio-menu" role="menu" aria-label="Audio output">
-                  {[
-                    { id: "speaker", label: "Speaker", icon: FiVolume2 },
-                    { id: "earpiece", label: "Earpiece", icon: FiSmartphone },
-                    { id: "bluetooth", label: "Bluetooth", icon: FiBluetooth },
-                  ].map(({ id, label, icon: Icon }) => (
-                    <button
+          {call && (
+            <div
+              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""}`}
+              role={callMinimized ? "region" : "dialog"}
+              aria-modal={!callMinimized}
+              aria-label={callMinimized ? "Call in progress" : "Call"}
+            >
+              <div className="call-audio-layer" aria-hidden="true">
+                {remoteEntries.map(([id, stream]) => <RemoteAudio key={id} stream={stream} />)}
+              </div>
+              {showVideoStage && (
+                <div
+                  className={`call-stage ${remoteEntries.length > 1 ? "is-grid" : ""} ${localVideoExpanded ? "is-inset" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Swap video cards"
+                  title="Swap video cards"
+                  onClick={toggleVideoLayout}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      toggleVideoLayout();
+                    }
+                  }}
+                >
+                  {remoteEntries.map(([id, stream]) => (
+                    <CallVideo
                       key={id}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={audioRoute === id}
-                      className={audioRoute === id ? "is-selected" : ""}
-                      onClick={() => changeAudioRoute(id)}
-                    >
-                      <Icon />
-                      <span>{label}</span>
-                      {audioRoute === id && <FiCheck className="call-audio-check" />}
-                    </button>
+                      stream={stream}
+                      label={personFor(id)?.nickname || personFor(id)?.name || (String(id) === String(conversation?._id) ? conversation.nickname || conversation.name : "Participant")}
+                      photo={personFor(id)?.photo}
+                      muted={remoteMedia[id]?.muted}
+                      cameraOff={remoteMedia[id]?.cameraOff}
+                      minimized={callMinimized}
+                    />
                   ))}
-                  {audioDevices.some((device) => device.kind === "audioinput") && (
-                    <label className="call-microphone-picker">
-                      <span><FiMic /> Microphone</span>
-                      <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
-                        <option value="">Default</option>
-                        {audioDevices.filter((device) => device.kind === "audioinput").map((device, index) => (
-                          <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
                 </div>
               )}
-            </div>
-            {call.isVideo && (
-              <div className="call-action">
-                <button type="button" className={`call-round ${cameraOff ? "is-on" : ""}`} aria-pressed={cameraOff} onClick={() => toggleTrack("video")} aria-label={cameraOff ? "Turn camera on" : "Turn camera off"}>
-                  {cameraOff ? <FiVideoOff /> : <FiVideo />}
-                </button>
-                <span>Camera</span>
-              </div>
-            )}
-            <div className="call-action">
-              <button type="button" className={`call-round ${muted ? "is-on" : ""}`} aria-pressed={muted} onClick={() => toggleTrack("audio")} aria-label={muted ? "Unmute" : "Mute"}>
-                {muted ? <FiMicOff /> : <FiMic />}
-              </button>
-              <span>{muted ? "Unmute" : "Mute"}</span>
-            </div>
-            {call.isVideo && (
-              <div className="call-action">
-                <button type="button" className="call-round" onClick={flipCamera} aria-label="Switch camera">
-                  <FiRefreshCw />
-                </button>
-                <span>Flip</span>
-              </div>
-            )}
-            <div className="call-action">
-              <button type="button" className="call-round is-end" onClick={hangUp} aria-label="End call">
-                <FiPhoneOff />
-              </button>
-              <span>End</span>
-            </div>
-          </div>
-        </div>
-      )}
+              {call.isVideo && (
+                <video
+                  id="local-call-stream"
+                  ref={localVideoRef}
+                  className={`call-self-view ${facingMode === "user" ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded ? "is-expanded" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={localVideoExpanded ? "Show partner video full screen" : "Show your video full screen"}
+                  title="Swap video cards"
+                  onClick={toggleVideoLayout}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      toggleVideoLayout();
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  muted
+                />
+              )}
 
-      {/* ---------- after a call: "Line busy", "No answer", "Call ended 01:23" … ---------- */}
-      {ended && !call && !incoming && (
-        <div className="call-screen call-overlay is-ended" role="status" onClick={() => setEnded(null)}>
-          <div className="call-hero">
-            <div className="call-avatar">
-              <img src={getImageURL(ended.photo)} alt="" />
+              {callMinimized ? (
+                <div className="call-mini-bar">
+                  <button type="button" className="call-mini-main" onClick={() => setCallMinimized(false)} aria-label={`Return to ${callName || "call"}`}>
+                    <span className="call-mini-pulse" />
+                    <span className="call-mini-text">{callName || "Call"} · {statusText}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`call-mini-mute ${muted ? "is-muted" : ""}`}
+                    onClick={() => toggleTrack("audio")}
+                    aria-label={muted ? "Unmute call" : "Mute call"}
+                    aria-pressed={muted}
+                  >
+                    {muted ? <FiMicOff /> : <FiMic />}
+                  </button>
+                  <button type="button" className="call-mini-end" onClick={hangUp} aria-label="End call">
+                    <FiPhoneOff />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="call-minimize-button"
+                    onClick={() => {
+                      setAudioMenuOpen(false);
+                      setCallMinimized(true);
+                    }}
+                    aria-label="Back to conversation"
+                    title="Back to conversation"
+                  >
+                    <FiArrowLeft />
+                  </button>
+
+                  <div className={`call-hero ${showVideoStage ? "is-compact" : ""}`}>
+                    <p className="call-kind">{call.isVideo ? "Video call" : "Voice call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
+                    {!showVideoStage && (
+                      <div className={`call-avatar ${call.connectedAt ? "" : "is-ringing"}`}>
+                        <img src={getImageURL(call.photo)} alt="" />
+                      </div>
+                    )}
+                    <h2 className="call-name">{callName || "Call"}</h2>
+                    <p className="call-status">{statusText}</p>
+                    {Object.entries(remoteMedia).some(([, state]) => state.muted) && !showVideoStage && <p className="call-sub">Muted</p>}
+                    {call.connectedAt && remoteEntries.length === 0 && <p className="call-sub">Connecting audio…</p>}
+                  </div>
+
+                  <div className={`call-actions ${call.isVideo ? "is-video" : ""}`}>
+                    <div className="call-action call-audio-action" ref={audioMenuRef}>
+                      <button
+                        type="button"
+                        className={`call-round ${audioMenuOpen || audioRoute !== "speaker" ? "is-on" : ""}`}
+                        onClick={() => setAudioMenuOpen((open) => !open)}
+                        aria-label="Choose audio output"
+                        aria-expanded={audioMenuOpen}
+                        aria-haspopup="menu"
+                        title="Audio output"
+                      >
+                        {audioRoute === "bluetooth" ? <FiBluetooth /> : audioRoute === "earpiece" ? <FiSmartphone /> : <FiVolume2 />}
+                      </button>
+                      <span>Audio</span>
+                      {audioMenuOpen && (
+                        <div className="call-audio-menu" role="menu" aria-label="Audio output">
+                          {[
+                            { id: "speaker", label: "Speaker", icon: FiVolume2 },
+                            { id: "earpiece", label: "Earpiece", icon: FiSmartphone },
+                            { id: "bluetooth", label: "Bluetooth", icon: FiBluetooth },
+                          ].map(({ id, label, icon: Icon }) => (
+                            <button
+                              key={id}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={audioRoute === id}
+                              className={audioRoute === id ? "is-selected" : ""}
+                              onClick={() => changeAudioRoute(id)}
+                            >
+                              <Icon />
+                              <span>{label}</span>
+                              {audioRoute === id && <FiCheck className="call-audio-check" />}
+                            </button>
+                          ))}
+                          {audioDevices.some((device) => device.kind === "audioinput") && (
+                            <label className="call-microphone-picker">
+                              <span><FiMic /> Microphone</span>
+                              <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
+                                <option value="">Default</option>
+                                {audioDevices.filter((device) => device.kind === "audioinput").map((device, index) => (
+                                  <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {call.isVideo && (
+                      <div className="call-action">
+                        <button type="button" className={`call-round ${cameraOff ? "is-on" : ""}`} aria-pressed={cameraOff} onClick={() => toggleTrack("video")} aria-label={cameraOff ? "Turn camera on" : "Turn camera off"}>
+                          {cameraOff ? <FiVideoOff /> : <FiVideo />}
+                        </button>
+                        <span>Camera</span>
+                      </div>
+                    )}
+                    <div className="call-action">
+                      <button type="button" className={`call-round ${muted ? "is-on" : ""}`} aria-pressed={muted} onClick={() => toggleTrack("audio")} aria-label={muted ? "Unmute" : "Mute"}>
+                        {muted ? <FiMicOff /> : <FiMic />}
+                      </button>
+                      <span>{muted ? "Unmute" : "Mute"}</span>
+                    </div>
+                    {call.isVideo && (
+                      <div className="call-action">
+                        <button type="button" className="call-round" onClick={flipCamera} aria-label="Switch camera">
+                          <FiRefreshCw />
+                        </button>
+                        <span>Flip</span>
+                      </div>
+                    )}
+                    <div className="call-action">
+                      <button type="button" className="call-round is-end" onClick={hangUp} aria-label="End call">
+                        <FiPhoneOff />
+                      </button>
+                      <span>End</span>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            <h2 className="call-name">{ended.name || "Call"}</h2>
-            <p className="call-status is-ended">{ended.title}</p>
-            {ended.subtitle && <p className="call-sub">{ended.subtitle}</p>}
-          </div>
-        </div>
+          )}
+
+          {ended && !call && !incoming && (
+            <div className="call-screen call-overlay is-ended" role="status" onClick={() => setEnded(null)}>
+              <div className="call-hero">
+                <div className="call-avatar">
+                  <img src={getImageURL(ended.photo)} alt="" />
+                </div>
+                <h2 className="call-name">{ended.name || "Call"}</h2>
+                <p className="call-status is-ended">{ended.title}</p>
+                {ended.subtitle && <p className="call-sub">{ended.subtitle}</p>}
+              </div>
+            </div>
+          )}
+        </>,
+        portalRoot
       )}
     </>
   );
 }
 
-function CallVideo({ stream, label, photo, muted, cameraOff }) {
+function CallVideo({ stream, label, photo, muted, cameraOff, minimized }) {
   const videoRef = useRef(null);
   useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = stream || null;
-  }, [stream]);
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = stream || null;
+    const resumePlayback = () => {
+      if (!stream || minimized || document.visibilityState === "hidden") return;
+      video.play().catch((error) => {
+        if (error?.name !== "NotAllowedError") console.error("Unable to resume remote call video:", error);
+      });
+    };
+    const videoTracks = stream?.getVideoTracks() || [];
+    video.addEventListener("loadedmetadata", resumePlayback);
+    videoTracks.forEach((track) => track.addEventListener("unmute", resumePlayback));
+    document.addEventListener("visibilitychange", resumePlayback);
+    window.addEventListener("pageshow", resumePlayback);
+    resumePlayback();
+    return () => {
+      video.removeEventListener("loadedmetadata", resumePlayback);
+      videoTracks.forEach((track) => track.removeEventListener("unmute", resumePlayback));
+      document.removeEventListener("visibilitychange", resumePlayback);
+      window.removeEventListener("pageshow", resumePlayback);
+    };
+  }, [stream, minimized, cameraOff]);
   return (
     <div className={`call-tile ${cameraOff ? "is-camera-off" : ""}`}>
-      {cameraOff ? <img className="call-tile-avatar" src={getImageURL(photo)} alt="" /> : <video ref={videoRef} autoPlay playsInline />}
-      <span>{label}{muted ? " · Muted" : ""}</span>
+      {cameraOff ? (
+        <div className="call-camera-off-content">
+          <div className="call-avatar is-ringing">
+            <img src={getImageURL(photo)} alt="" />
+          </div>
+          <strong>{label}</strong>
+          {muted && <span>Muted</span>}
+        </div>
+      ) : (
+        <>
+          <video ref={videoRef} autoPlay playsInline muted />
+          <span>{label}</span>
+          {muted && <span className="call-tile-muted">Muted</span>}
+        </>
+      )}
     </div>
   );
 }
@@ -1165,7 +1419,24 @@ function CallVideo({ stream, label, photo, muted, cameraOff }) {
 function RemoteAudio({ stream }) {
   const audioRef = useRef(null);
   useEffect(() => {
-    if (audioRef.current) audioRef.current.srcObject = stream || null;
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.srcObject = stream || null;
+    const resumePlayback = () => {
+      if (!stream || document.visibilityState === "hidden") return;
+      audio.play().catch((error) => {
+        if (error?.name !== "NotAllowedError") console.error("Unable to resume call audio:", error);
+      });
+    };
+    audio.addEventListener("canplay", resumePlayback);
+    document.addEventListener("visibilitychange", resumePlayback);
+    window.addEventListener("pageshow", resumePlayback);
+    resumePlayback();
+    return () => {
+      audio.removeEventListener("canplay", resumePlayback);
+      document.removeEventListener("visibilitychange", resumePlayback);
+      window.removeEventListener("pageshow", resumePlayback);
+    };
   }, [stream]);
   return <audio ref={audioRef} autoPlay />;
 }

@@ -1,8 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FiBell, FiBellOff, FiDownload, FiFile, FiImage, FiLink, FiSearch, FiUser, FiX } from "react-icons/fi";
-import { toast } from "react-toastify";
+import { FiArrowLeft, FiBell, FiBellOff, FiDownload, FiFile, FiImage, FiLink, FiMusic, FiSearch, FiSmile, FiUser, FiVideo, FiX } from "react-icons/fi";
+import { toast } from "sonner";
+import NicknamesModal from "./NicknamesModal";
+
+const mediaCategories = [
+  { id: "photos", label: "Photos" },
+  { id: "videos", label: "Videos" },
+  { id: "docs", label: "Docs" },
+  { id: "links", label: "Links" },
+  { id: "stickers", label: "Stickers" },
+  { id: "audio", label: "Audio" },
+];
 
 export default function ConversationMenu({ conversation, onViewContact }) {
   const [open, setOpen] = useState(false);
@@ -13,9 +23,12 @@ export default function ConversationMenu({ conversation, onViewContact }) {
   const [searchError, setSearchError] = useState("");
   const [mediaOpen, setMediaOpen] = useState(false);
   const [mediaItems, setMediaItems] = useState([]);
+  const [mediaCategory, setMediaCategory] = useState("photos");
+  const [mediaPreview, setMediaPreview] = useState(null);
   const [loadingMedia, setLoadingMedia] = useState(false);
   const [muted, setMuted] = useState(false);
   const [savingMute, setSavingMute] = useState(false);
+  const [nicknamesOpen, setNicknamesOpen] = useState(false);
   const rootRef = useRef(null);
   const conversationId = conversation?._id;
   const isGroup = conversation?.is_group === 1;
@@ -72,8 +85,21 @@ export default function ConversationMenu({ conversation, onViewContact }) {
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!mediaOpen && !mediaPreview) return;
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      if (mediaPreview) setMediaPreview(null);
+      else setMediaOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [mediaOpen, mediaPreview]);
+
   const openMedia = async () => {
     setOpen(false);
+    setMediaCategory("photos");
+    setMediaPreview(null);
     setMediaOpen(true);
     setLoadingMedia(true);
     try {
@@ -91,7 +117,10 @@ export default function ConversationMenu({ conversation, onViewContact }) {
       const history = await loadHistory();
       const lines = history.map((item) => {
         const time = new Date(item.message?.createdAt || Date.now()).toLocaleString();
-        const sender = item.sender?.name || "Unknown";
+        const sender = Number(conversation?.is_group) !== 1 &&
+          String(item.sender?._id) === String(conversation?._id)
+          ? conversation?.nickname || item.sender?.name || "Unknown"
+          : item.sender?.name || "Unknown";
         const body = item.message?.deletedForEveryone
           ? "This message was deleted."
           : item.message?.message || item.message?.attachmentName || item.message?.attachmentUrl || "";
@@ -101,7 +130,7 @@ export default function ConversationMenu({ conversation, onViewContact }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${(conversation?.name || "conversation").replace(/[^\w.-]+/g, "_")}-chat.txt`;
+      link.download = `${(conversation?.nickname || conversation?.name || "conversation").replace(/[^\w.-]+/g, "_")}-chat.txt`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -165,18 +194,40 @@ export default function ConversationMenu({ conversation, onViewContact }) {
     const media = typeof message.attachmentUrl === "string" &&
       /^(\/api\/attachments\/|https?:\/\/)/i.test(message.attachmentUrl) ? [{
       key: `${item.message_id}-attachment`,
-      icon: message.type === "image" || message.type === "video" ? FiImage : FiFile,
-      label: message.attachmentName || (message.type === "image" ? "Photo" : message.type === "video" ? "Video" : "File"),
+      icon: message.type === "image" ? FiImage
+        : message.type === "video" ? FiVideo
+          : message.type === "audio" ? FiMusic
+            : message.type === "sticker" ? FiSmile : FiFile,
+      category: message.type === "image" ? "photos"
+        : message.type === "video" ? "videos"
+          : message.type === "audio" ? "audio"
+            : message.type === "sticker" ? "stickers" : "docs",
+      type: message.type,
+      label: message.attachmentName || (message.type === "image" ? "Photo"
+        : message.type === "video" ? "Video"
+          : message.type === "audio" ? "Audio"
+            : message.type === "sticker" ? "Sticker" : "File"),
       href: message.attachmentUrl,
     }] : [];
     const links = (message.message || "").match(/https?:\/\/[^\s]+/g) || [];
     return [...media, ...links.map((href, index) => ({
       key: `${item.message_id}-link-${index}`,
       icon: FiLink,
+      category: "links",
+      type: "link",
       label: href,
       href,
     }))];
   });
+  const selectedMediaItems = items.filter((item) => item.category === mediaCategory);
+  const mediaCounts = Object.fromEntries(mediaCategories.map(({ id }) => [
+    id,
+    items.filter((item) => item.category === id).length,
+  ]));
+  const closeMedia = () => {
+    setMediaOpen(false);
+    setMediaPreview(null);
+  };
 
   if (!conversationId) return null;
   return (
@@ -196,6 +247,11 @@ export default function ConversationMenu({ conversation, onViewContact }) {
             <FiSearch /> Search
           </button>
           <button type="button" role="menuitem" onClick={openMedia}><FiImage /> Media, files & links</button>
+          {conversation?.is_group !== 1 && (
+            <button type="button" role="menuitem" onClick={() => { setOpen(false); setNicknamesOpen(true); }}>
+              <FiUser /> Nicknames
+            </button>
+          )}
           <button type="button" role="menuitem" onClick={() => { setOpen(false); onViewContact?.(); }}><FiUser /> View contact</button>
           <button type="button" role="menuitem" onClick={exportChat}><FiDownload /> Export chat</button>
           <button type="button" role="menuitem" onClick={toggleMute} disabled={savingMute}>
@@ -226,24 +282,100 @@ export default function ConversationMenu({ conversation, onViewContact }) {
         </div>
       )}
       {mediaOpen && (
-        <div className="confirmation-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
+        <div className="confirmation-overlay" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) closeMedia(); }}>
           <section className="conversation-media-dialog" role="dialog" aria-modal="true" aria-labelledby="conversation-media-title">
             <header>
               <h2 id="conversation-media-title">Media, files & links</h2>
-              <button type="button" onClick={() => setMediaOpen(false)} aria-label="Close media"><FiX /></button>
+              <button type="button" onClick={closeMedia} aria-label="Close media"><FiX /></button>
             </header>
-            {loadingMedia ? <p className="p-6 text-center text-sm text-[#91a0b7]">Loading conversation history…</p> : items.length ? (
-              <div className="conversation-media-list">
-                {items.map(({ key, icon: Icon, label, href }) => (
-                  <a key={key} href={href} target="_blank" rel="noreferrer" className="conversation-media-item">
-                    <Icon />
-                    <span>{label}</span>
-                  </a>
-                ))}
-              </div>
-            ) : <p className="p-6 text-center text-sm text-[#91a0b7]">No media, files, or links shared.</p>}
+            {loadingMedia ? <p className="p-6 text-center text-sm text-[#91a0b7]">Loading conversation history…</p> : (
+              <>
+                <nav className="conversation-media-tabs" role="tablist" aria-label="Media categories">
+                  {mediaCategories.map(({ id, label }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="tab"
+                      aria-selected={mediaCategory === id}
+                      className={mediaCategory === id ? "is-selected" : ""}
+                      onClick={() => setMediaCategory(id)}
+                    >
+                      {label}
+                      <span>{mediaCounts[id]}</span>
+                    </button>
+                  ))}
+                </nav>
+                {selectedMediaItems.length ? (
+                  <div className={`conversation-media-list ${["photos", "videos", "stickers"].includes(mediaCategory) ? "is-grid" : ""}`}>
+                    {selectedMediaItems.map((item) => {
+                      const { key, icon: Icon, label, href, category, type } = item;
+                      const canPreview = ["photos", "videos", "stickers", "audio"].includes(category);
+                      if (canPreview) {
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={category === "audio" ? "conversation-media-item conversation-media-preview-item" : "conversation-media-tile"}
+                            onClick={() => setMediaPreview(item)}
+                            aria-label={`Preview ${label}`}
+                          >
+                            {category === "photos" || category === "stickers"
+                              ? <img src={href} alt="" loading="lazy" />
+                              : category === "videos"
+                                ? <video src={href} preload="metadata" muted playsInline />
+                                : <span className={`conversation-media-icon ${category === "audio" ? "is-inline" : ""}`}><Icon /></span>}
+                            <span title={label}>{label}</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <a
+                          key={key}
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          download={category === "docs" ? true : undefined}
+                          className="conversation-media-item"
+                        >
+                          <Icon />
+                          <span>{label}</span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="p-6 text-center text-sm text-[#91a0b7]">
+                    No {mediaCategories.find((item) => item.id === mediaCategory)?.label.toLowerCase()} shared.
+                  </p>
+                )}
+              </>
+            )}
           </section>
+          {mediaPreview && (
+            <div
+              className="photo-preview-overlay conversation-media-preview"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${mediaPreview.label} preview`}
+              onClick={(event) => { if (event.target === event.currentTarget) setMediaPreview(null); }}
+            >
+              <div className="photo-preview-bar">
+                <button type="button" className="photo-preview-back" onClick={() => setMediaPreview(null)} aria-label="Back to media" title="Back">
+                  <FiArrowLeft />
+                </button>
+                <span className="min-w-0 truncate text-sm text-[#c7d2e3]">{mediaPreview.label}</span>
+              </div>
+              {mediaPreview.type === "video"
+                ? <video src={mediaPreview.href} controls playsInline />
+                : mediaPreview.type === "audio"
+                  ? <audio src={mediaPreview.href} controls />
+                  : <img src={mediaPreview.href} alt={mediaPreview.label} />}
+            </div>
+          )}
         </div>
+      )}
+      {nicknamesOpen && (
+        <NicknamesModal conversation={conversation} onClose={() => setNicknamesOpen(false)} />
       )}
     </div>
   );

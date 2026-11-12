@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import { AuthContext } from "../contexts/AuthContext";
 import { MessageContext } from "../contexts/MessageContext";
 import { UserContext } from "../contexts/UserContext";
@@ -651,13 +651,13 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
           </button>
           <div align="center">
             {data.photo ? (
-              <img src={getImageURL(data.photo)} alt={data.name} className="mb-3 h-20 w-20 rounded-full border border-[#263248] object-cover" />
+              <img src={getImageURL(data.photo)} alt={selectedUser?.nickname || data.name} className="mb-3 h-20 w-20 rounded-full border border-[#263248] object-cover" />
             ) : null}
-            <h1 className="break-words px-8 text-lg font-bold">{data.name}</h1>
+            <h1 className="break-words px-8 text-lg font-bold">{selectedUser?.nickname || data.name}</h1>
             <div className="w-full max-w-md mt-5">
               <div className="mb-4 text-left">
                 <label className="mb-2 block text-sm font-semibold" htmlFor="contact-nickname">
-                  Nickname
+                  Your nickname for them
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -665,7 +665,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
                     className="min-w-0 flex-1 rounded-xl border border-[#263248] bg-[#0c1321] px-3 py-2 text-sm text-white"
                     value={nickname}
                     maxLength={40}
-                    placeholder={selectedUser?.name || "Set a nickname"}
+                    placeholder={data?.name || selectedUser?.name || "Set a nickname"}
                     onChange={(event) => setNickname(event.target.value)}
                   />
                   <button
@@ -678,6 +678,12 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-[#91a0b7]">Only you will see this name.</p>
+                <div className="mt-3 rounded-xl border border-[#263248] bg-[#0c1321] px-3 py-2">
+                  <span className="block text-xs text-[#91a0b7]">Their nickname for you</span>
+                  <span className="mt-1 block text-sm text-white">
+                    {selectedUser?.partnerNickname || "No nickname set"}
+                  </span>
+                </div>
               </div>
               <div className="mb-4">
                 <div>{data.phone}</div>

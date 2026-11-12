@@ -5,7 +5,7 @@ import { IoIosAddCircleOutline, IoMdArrowDropdown } from "react-icons/io";
 import { IoPowerOutline } from "react-icons/io5";
 import { IoNotificationsOutline } from "react-icons/io5";
 import { MdAdd } from "react-icons/md";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import { AuthContext } from "../contexts/AuthContext";
 import { clearAuthProfile, getImageURL, socket_connection } from "../helpers/helper";
 import GroupCreateModal from "./GroupCreateModal";

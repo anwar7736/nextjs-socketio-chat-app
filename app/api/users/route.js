@@ -188,15 +188,51 @@ export async function GET(request) {
     const groupIds = data
         .filter((item) => Number(item.is_group) === 1)
         .map((item) => new mongoose.Types.ObjectId(item._id));
+    const directConversations = await messageLogSchema.aggregate([
+        {
+            $match: {
+                group_id: null,
+                $or: [
+                    { sender_id: authObjectId },
+                    { receiver_id: authObjectId },
+                ],
+            },
+        },
+        {
+            $group: {
+                _id: {
+                    $cond: [
+                        { $eq: ["$sender_id", authObjectId] },
+                        "$receiver_id",
+                        "$sender_id",
+                    ],
+                },
+                last_activity: { $max: "$createdAt" },
+            },
+        },
+    ]);
+    const directActivity = new Map(
+        directConversations.map((item) => [String(item._id), item.last_activity])
+    );
     const recentLogs = groupIds.length || data.length
         ? await messageLogSchema.aggregate([
             {
                 $match: {
+                    status: { $ne: 2 },
                     $or: [
-                        { sender_id: authObjectId, group_id: { $exists: false } },
-                        { receiver_id: authObjectId, group_id: { $exists: false } },
+                        { sender_id: authObjectId, group_id: null },
+                        { receiver_id: authObjectId, group_id: null },
                         ...(groupIds.length ? [{ group_id: { $in: groupIds }, receiver_id: authObjectId }] : []),
                     ],
+                },
+            },
+            { $sort: { createdAt: -1 } },
+            { $lookup: { from: "messages", localField: "message_id", foreignField: "_id", as: "message" } },
+            { $unwind: "$message" },
+            {
+                $match: {
+                    "message.deletedForEveryone": { $ne: true },
+                    "message.hiddenFor": { $nin: [authObjectId] },
                 },
             },
             { $sort: { createdAt: -1 } },
@@ -214,21 +250,9 @@ export async function GET(request) {
                     status: { $first: "$status" },
                     createdAt: { $first: "$createdAt" },
                     group_id: { $first: "$group_id" },
-                },
-            },
-            { $lookup: { from: "messages", localField: "message_id", foreignField: "_id", as: "message" } },
-            { $unwind: "$message" },
-            {
-                $project: {
-                    _id: 1,
-                    message_id: 1,
-                    sender_id: 1,
-                    status: 1,
-                    createdAt: 1,
-                    group_id: 1,
-                    text: "$message.message",
-                    type: "$message.type",
-                    attachmentName: "$message.attachmentName",
+                    text: { $first: "$message.message" },
+                    type: { $first: "$message.type" },
+                    attachmentName: { $first: "$message.attachmentName" },
                 },
             },
         ])
@@ -258,25 +282,43 @@ export async function GET(request) {
     const blockedByIds = new Set(blockedByUsers.map((item) => String(item._id)));
     const archivedIds = new Set((currentUser?.archivedConversations || []).map(String));
     const blockedIds = new Set((currentUser?.blockedUsers || []).map(String));
-    const withNicknames = data.map((item) => {
-        const latest = recentByConversation.get(String(item._id));
-        return {
-            ...item,
-            ...(Number(item.is_group) === 0 ? { nickname: nicknames[String(item._id)] || "" } : {}),
-            archived: archivedIds.has(String(item._id)),
-            blocked: blockedIds.has(String(item._id)),
-            blockedByPartner: blockedByIds.has(String(item._id)),
-            ...(latest ? {
-                last_activity: latest.createdAt,
-                last_message: latest.text || "",
-                last_message_type: latest.type || "text",
-                last_message_attachment: latest.attachmentName || "",
-                last_message_sender_id: String(latest.sender_id),
-                last_message_status: Number(item.is_group) === 1
-                    ? (groupSeenByMessage.get(String(latest.message_id)) || 0)
-                    : latest.status,
-            } : {}),
-        };
-    }).sort((a, b) => new Date(b.last_activity || 0) - new Date(a.last_activity || 0));
+    const visibleConversations = data
+        .filter((item) => Number(item.is_group) === 1 || directActivity.has(String(item._id)));
+    const directIds = visibleConversations
+        .filter((item) => Number(item.is_group) === 0)
+        .map((item) => item._id);
+    const partnerNicknameDocs = directIds.length
+        ? await userSchema.find({ _id: { $in: directIds } }).select("_id nicknames").lean()
+        : [];
+    const partnerNicknames = new Map(partnerNicknameDocs.map((item) => {
+        const names = item.nicknames instanceof Map ? Object.fromEntries(item.nicknames) : item.nicknames || {};
+        return [String(item._id), names[String(userId)] || ""];
+    }));
+    const withNicknames = visibleConversations
+        .map((item) => {
+            const conversationId = String(item._id);
+            const latest = recentByConversation.get(conversationId);
+            return {
+                ...item,
+                last_activity: latest?.createdAt || directActivity.get(conversationId) || item.last_activity,
+                ...(Number(item.is_group) === 0 ? {
+                    nickname: nicknames[String(item._id)] || "",
+                    partnerNickname: partnerNicknames.get(conversationId) || "",
+                } : {}),
+                archived: archivedIds.has(String(item._id)),
+                blocked: blockedIds.has(String(item._id)),
+                blockedByPartner: blockedByIds.has(String(item._id)),
+                ...(latest ? {
+                    last_activity: latest.createdAt,
+                    last_message: latest.text || "",
+                    last_message_type: latest.type || "text",
+                    last_message_attachment: latest.attachmentName || "",
+                    last_message_sender_id: String(latest.sender_id),
+                    last_message_status: Number(item.is_group) === 1
+                        ? (groupSeenByMessage.get(String(latest.message_id)) || 0)
+                        : latest.status,
+                } : {}),
+            };
+        }).sort((a, b) => new Date(b.last_activity || 0) - new Date(a.last_activity || 0));
     return NextResponse.json({ success: true, data: withNicknames });
 }

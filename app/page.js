@@ -3,7 +3,7 @@ import Picker from "emoji-picker-react";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FaPaperclip } from "react-icons/fa";
 import { FiMic, FiSend, FiSquare } from "react-icons/fi";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import GroupEditOrViewModal from "./components/GroupEditOrViewModal";
 import Messages from "./components/Messages";
 import Sidebar from "./components/Sidebar";
@@ -100,6 +100,7 @@ const Home = () => {
   const typingActiveRef = useRef(false);
   const typingUsersTimersRef = useRef(new Map());
   const mutedConversationsRef = useRef(new Set());
+  const conversationHistoryRef = useRef(false);
   useEffect(() => {
     const updateMuted = (event) => {
       const { conversationId, muted } = event.detail || {};
@@ -124,19 +125,26 @@ const Home = () => {
     );
   }, []);
   const authUser = auth();
+  const selectedConversationRef = useRef(user);
+  const authUserRef = useRef(authUser);
+  selectedConversationRef.current = user;
+  authUserRef.current = authUser;
   const emitTypingStatus = useCallback((typing, conversation = user) => {
-    if (!conversation?._id || !authUser?._id) return;
-    socket.emit("typing-status", {
-      sender_id: authUser._id,
-      sender_name: authUser.name,
-      receiver_id: conversation._id,
-      is_group: conversation.is_group === 1,
-      recipient_ids: conversation.is_group === 1
-        ? (conversation.member_ids || []).map(String)
-        : undefined,
+    const activeUser = authUserRef.current;
+    if (!socket.connected || !conversation?._id || !activeUser?._id) return;
+    const isGroup = Number(conversation.is_group) === 1;
+    const recipients = isGroup
+      ? [...new Set((conversation.member_ids || []).map((id) => String(id?._id || id)).filter(Boolean))]
+      : undefined;
+    socket.volatile.emit("typing-status", {
+      sender_id: String(activeUser._id),
+      sender_name: activeUser.name,
+      receiver_id: String(conversation._id),
+      is_group: isGroup,
+      ...(isGroup ? { recipient_ids: recipients } : {}),
       typing,
     });
-  }, [authUser?._id, authUser?.name, user]);
+  }, [user]);
 
   const stopTyping = useCallback((conversation = user) => {
     clearTimeout(typingTimerRef.current);
@@ -163,6 +171,49 @@ const Home = () => {
     typingUsersTimersRef.current.clear();
     return () => stopTyping(user);
   }, [stopTyping, user]);
+
+  useEffect(() => {
+    const typingTimers = typingUsersTimersRef.current;
+    const onTypingStatus = (event) => {
+      const conversation = selectedConversationRef.current;
+      const sameConversation =
+        String(event?.receiver_id) === String(conversation?._id) &&
+        Boolean(event?.is_group) === (Number(conversation?.is_group) === 1);
+      if (!sameConversation || !event?.sender_id) return;
+
+      const senderId = String(event.sender_id);
+      const existingTimer = typingTimers.get(senderId);
+      if (existingTimer) clearTimeout(existingTimer);
+      if (!event.typing) {
+        typingTimers.delete(senderId);
+        setTypingUsers((current) => current.filter((item) => String(item.user_id) !== senderId));
+        return;
+      }
+
+      setTypingUsers((current) => [
+        ...current.filter((item) => String(item.user_id) !== senderId),
+        { user_id: senderId, name: event.sender_name || "Someone" },
+      ]);
+      typingTimers.set(senderId, setTimeout(() => {
+        typingTimers.delete(senderId);
+        setTypingUsers((current) => current.filter((item) => String(item.user_id) !== senderId));
+      }, 4000));
+    };
+    const onSocketConnect = () => {
+      if (typingActiveRef.current) {
+        emitTypingStatus(true, selectedConversationRef.current);
+      }
+    };
+
+    socket.on("typing-status", onTypingStatus);
+    socket.on("connect", onSocketConnect);
+    return () => {
+      socket.off("typing-status", onTypingStatus);
+      socket.off("connect", onSocketConnect);
+      typingTimers.forEach((timer) => clearTimeout(timer));
+      typingTimers.clear();
+    };
+  }, [emitTypingStatus]);
 
   useEffect(() => {
     if (!authUser?._id) return;
@@ -260,7 +311,12 @@ const Home = () => {
     addExitGuard();
 
     const handleBack = (event) => {
-      if (allowAppExitRef.current || event.state?.convoExitGuard) return;
+      if (allowAppExitRef.current || event.state?.convoChat || event.state?.nicknamesDialog) return;
+      if (selectedConversationRef.current?._id) {
+        setUser("");
+        setMessages([]);
+        return;
+      }
       setExitConfirmationOpen(true);
       addExitGuard();
     };
@@ -272,7 +328,24 @@ const Home = () => {
         window.history.replaceState(state, "", window.location.href);
       }
     };
-  }, [authUser?._id]);
+  }, [authUser?._id, setMessages, setUser]);
+
+  useEffect(() => {
+    const hasConversation = Boolean(user?._id);
+    if (hasConversation && !conversationHistoryRef.current) {
+      window.history.pushState({ convoChat: true }, "", window.location.href);
+    }
+    conversationHistoryRef.current = hasConversation;
+  }, [user?._id, user?.is_group]);
+
+  const closeConversation = () => {
+    if (window.history.state?.convoChat) {
+      window.history.back();
+      return;
+    }
+    setUser("");
+    setMessages([]);
+  };
 
   useEffect(() => {
     if (!exitConfirmationOpen) return;
@@ -307,6 +380,14 @@ const Home = () => {
       if (requestId === userListRequestRef.current) setIsUserListLoading(false);
     }
   }, [authUser?._id, search, setUsers]);
+  const getUserListRef = useRef(getUserList);
+  getUserListRef.current = getUserList;
+
+  useEffect(() => {
+    const refreshConversations = () => getUserList({ showLoading: false });
+    window.addEventListener("chat:refresh-conversations", refreshConversations);
+    return () => window.removeEventListener("chat:refresh-conversations", refreshConversations);
+  }, [getUserList]);
 
   useEffect(() => {
     if (!user?._id || user?.is_group === 1) return;
@@ -503,31 +584,35 @@ const Home = () => {
   const loadRealTimeMessages = () => {
     socket.off("private-message");
     socket.on("private-message", async (data) => {
-      const notificationConversationId = data?.is_group == 1
+      const isGroup = Number(data?.is_group) === 1;
+      const notificationConversationId = isGroup
         ? data?.receiver_id
-        : data?.sender_id === authUser?._id ? data?.receiver_id : data?.sender_id;
-      if (
-        data?.sender_id !== authUser?._id &&
+        : String(data?.sender_id) === String(authUser?._id) ? data?.receiver_id : data?.sender_id;
+      const sameOpenConversation = Boolean(user?._id) &&
+        Number(user?.is_group) === Number(data?.is_group) &&
+        (isGroup
+          ? String(user?._id) === String(data?.receiver_id)
+          : String(user?._id) === String(data?.sender_id) ||
+            String(user?._id) === String(data?.receiver_id));
+      const shouldPlayReminder =
+        String(data?.sender_id) !== String(authUser?._id) &&
+        !sameOpenConversation &&
         document.visibilityState === "visible" &&
-        !mutedConversationsRef.current.has(String(notificationConversationId))
-      ) {
-        playMessageReminder();
-      }
+        !mutedConversationsRef.current.has(String(notificationConversationId));
       if (
-        (data?.is_group == 1 && user?._id == data?.receiver_id) ||
-        (data?.sender_id == authUser?._id && data?.receiver_id == user?._id) ||
-        (data?.sender_id == user?._id && data?.receiver_id == authUser?._id)
+        sameOpenConversation
       ) {
         let res = await loadMessages(user);
         setMessages(res);
-        getUserList({ showLoading: false });
+        window.dispatchEvent(new Event("chat:refresh-conversations"));
       } else if (
-        data?.receiver_id == authUser?._id ||
-        data?.sender_id == authUser?._id ||
-        data?.is_group == 1
+        String(data?.receiver_id) === String(authUser?._id) ||
+        String(data?.sender_id) === String(authUser?._id) ||
+        isGroup
       ) {
-        getUserList({ showLoading: false });
+        await getUserListRef.current({ showLoading: false });
       }
+      if (shouldPlayReminder) playMessageReminder();
     });
   };
 
@@ -548,32 +633,6 @@ const Home = () => {
       setUser((current) =>
         String(current?._id) === String(data.user_id) ? { ...current, lastSeenAt } : current
       );
-    });
-
-    socket.off("typing-status");
-    socket.on("typing-status", (event) => {
-      const sameConversation =
-        event?.receiver_id === user?._id &&
-        Boolean(event?.is_group) === (user?.is_group === 1);
-      if (!sameConversation || !event?.sender_id) return;
-
-      const timers = typingUsersTimersRef.current;
-      const existingTimer = timers.get(event.sender_id);
-      if (existingTimer) clearTimeout(existingTimer);
-      if (!event.typing) {
-        timers.delete(event.sender_id);
-        setTypingUsers((current) => current.filter((item) => item.user_id !== event.sender_id));
-        return;
-      }
-
-      setTypingUsers((current) => [
-        ...current.filter((item) => item.user_id !== event.sender_id),
-        { user_id: event.sender_id, name: event.sender_name || "Someone" },
-      ]);
-      timers.set(event.sender_id, setTimeout(() => {
-        timers.delete(event.sender_id);
-        setTypingUsers((current) => current.filter((item) => item.user_id !== event.sender_id));
-      }, 3500));
     });
 
     //new user registered
@@ -622,6 +681,7 @@ const Home = () => {
           ? { ...item, message: { ...item.message, message: "", attachmentUrl: "", attachmentName: "", deletedForEveryone: true, reactions: [] } }
           : item
       ));
+      window.dispatchEvent(new Event("chat:refresh-conversations"));
     });
 
     socket.off("message-edited");
@@ -631,6 +691,7 @@ const Home = () => {
           ? { ...item, message: { ...item.message, message: data.message, editedAt: data.editedAt } }
           : item
       ));
+      window.dispatchEvent(new Event("chat:refresh-conversations"));
     });
 
     socket.off("message-reaction");
@@ -836,8 +897,7 @@ const Home = () => {
                   aria-label="Back to conversations"
                   onClick={(event) => {
                     event.stopPropagation();
-                    setUser("");
-                    setMessages([]);
+                    closeConversation();
                   }}
                 >
                   <span aria-hidden="true">←</span>
@@ -848,7 +908,7 @@ const Home = () => {
                   height={40}
                   width={40}
                   className="h-10 w-10 rounded-full border border-indigo-400 object-cover"
-                  title={user?.name}
+                  title={user?.nickname || user?.name}
                 />
                 <span className="truncate">
                   <span className="block truncate text-sm font-semibold sm:text-base">{user?.nickname || user?.name}</span>

@@ -4,7 +4,7 @@ import { AuthContext } from "@/app/contexts/AuthContext";
 import { setAuthProfile } from "@/app/helpers/helper";
 import { useRouter } from "next/navigation";
 import { useContext, useState } from "react";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import ValidationError from "../ValidationError";
 
 export default function SignUp() {

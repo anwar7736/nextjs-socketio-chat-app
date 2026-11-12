@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { FiArchive, FiMoreHorizontal, FiSlash } from "react-icons/fi";
 import { MdDone, MdDoneAll } from "react-icons/md";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
 import { activityFormat, getImageURL, loadMessages } from "../helpers/helper";
@@ -156,7 +156,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                 onClick={() => getMessages(contact)}
               >
                 <div className="h-11 w-11 shrink-0 rounded-full bg-[#263248]">
-                  <img src={getImageURL(contact?.photo)} alt="" className="h-11 w-11 rounded-full border border-[#394761] object-cover" title={contact?.name} />
+                  <img src={getImageURL(contact?.photo)} alt="" className="h-11 w-11 rounded-full border border-[#394761] object-cover" title={contact?.nickname || contact?.name} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center">

@@ -1,7 +1,6 @@
 import localFont from "next/font/local";
 import "./globals.css";
-import { ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { Toaster } from "sonner";
 import UserContextProvider, { UserWrapper } from "./contexts/UserContext";
 import MessageContextProvider from "./contexts/MessageContext";
 import AuthContextProvider from "./contexts/AuthContext";
@@ -49,7 +48,21 @@ export default function RootLayout({ children }) {
             <UserContextProvider>
               <MessageContextProvider>
                 {children}
-                <ToastContainer />
+                <Toaster
+                  position="top-right"
+                  theme="dark"
+                  richColors
+                  closeButton
+                  duration={3500}
+                  visibleToasts={4}
+                  toastOptions={{
+                    style: {
+                      border: "1px solid #334155",
+                      borderRadius: "14px",
+                      boxShadow: "0 16px 40px rgb(0 0 0 / 35%)",
+                    },
+                  }}
+                />
               </MessageContextProvider>
             </UserContextProvider>
           </UserListContextProvider>

@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useState } from "react";
 import ValidationError from "./ValidationError";
 import { useForm } from "react-hook-form";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import { auth, causer_id, getImageURL, socket_connection } from "../helpers/helper";
 import { setCookie } from "cookies-next";
 import { AuthContext } from "../contexts/AuthContext";

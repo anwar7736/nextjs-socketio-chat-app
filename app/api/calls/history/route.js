@@ -12,11 +12,20 @@ const callIdPattern = /^[a-f\d-]{36}$/i;
 export async function GET(request) {
   const userId = await getSessionUserId(request);
   if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+  const searchParams = request.nextUrl.searchParams;
+  const conversationId = searchParams.get("conversation_id");
+  const isGroup = searchParams.get("is_group");
+  if (conversationId && !objectIdPattern.test(conversationId)) {
+    return NextResponse.json({ success: false, message: "Invalid conversation." }, { status: 400 });
+  }
+  if (isGroup !== null && !["0", "1"].includes(isGroup)) {
+    return NextResponse.json({ success: false, message: "Invalid conversation type." }, { status: 400 });
+  }
   await mongoDB_connect();
-  const data = await callLogSchema.find({ participants: new mongoose.Types.ObjectId(userId) })
-    .sort({ startedAt: -1 })
-    .limit(50)
-    .lean();
+  const query = { participants: new mongoose.Types.ObjectId(userId) };
+  if (conversationId) query.conversationId = new mongoose.Types.ObjectId(conversationId);
+  if (isGroup !== null) query.isGroup = isGroup === "1";
+  const data = await callLogSchema.find(query).sort({ startedAt: -1 }).limit(conversationId ? 100 : 50).lean();
   return NextResponse.json({ success: true, data });
 }
 
