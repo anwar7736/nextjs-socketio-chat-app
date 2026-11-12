@@ -175,7 +175,7 @@ export const getImageURL = (imageName, type = null) => {
   }
 };
 
-export const loadMessages = async (data) => {
+export const loadConversationTimeline = async (data) => {
   const response = await fetch(
     `api/messages?auth_id=${auth()?._id}&ref_id=${data?._id}&is_group=${
       data?.is_group
@@ -189,5 +189,11 @@ export const loadMessages = async (data) => {
   for (const event of res.seen_events || []) {
     activeSocket.emit("messages-seen", event);
   }
-  return res.data;
+  return {
+    messages: res.data,
+    callLogs: Array.isArray(res.call_logs) ? res.call_logs : [],
+  };
 };
+
+export const loadMessages = async (data) =>
+  (await loadConversationTimeline(data)).messages;

@@ -14,5 +14,7 @@ const callLogModel = new mongoose.Schema({
   durationSeconds: { type: Number, default: 0 },
 }, { timestamps: true });
 
+callLogModel.index({ participants: 1, conversationId: 1, isGroup: 1, startedAt: -1 });
+
 export const callLogSchema = mongoose.models.call_logs ||
   mongoose.model("call_logs", callLogModel);

@@ -4,13 +4,13 @@ import { MdDone, MdDoneAll } from "react-icons/md";
 import { toast } from "sonner";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
-import { activityFormat, getImageURL, loadMessages } from "../helpers/helper";
+import { activityFormat, getImageURL, loadConversationTimeline } from "../helpers/helper";
 import { UserListContext } from "../contexts/UserListContext";
 
 const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) => {
   const { user, setUser } = useContext(UserContext);
   const { users, setUsers } = useContext(UserListContext);
-  const { setMessages } = useContext(MessageContext);
+  const { setMessages, setCallLogs } = useContext(MessageContext);
   const [requestId, setRequestId] = useState(null);
   const [menuFor, setMenuFor] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -31,14 +31,18 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
     const requestId = ++requestIdRef.current;
     setConversationLoading(true);
     setMessages([]);
+    setCallLogs([]);
     setUser(data);
     setUsers((current) => current.map((item) =>
       item?._id === data?._id ? { ...item, pending: 0 } : item
     ));
     try {
-      const result = await loadMessages(data);
-      if (!Array.isArray(result)) throw new Error("Unable to load messages.");
-      if (requestId === requestIdRef.current) setMessages(result);
+      const timeline = await loadConversationTimeline(data);
+      if (!Array.isArray(timeline.messages)) throw new Error("Unable to load messages.");
+      if (requestId === requestIdRef.current) {
+        setMessages(timeline.messages);
+        setCallLogs(timeline.callLogs);
+      }
     } catch (error) {
       if (requestId === requestIdRef.current) {
         toast.error(error.message || "Unable to load messages.");

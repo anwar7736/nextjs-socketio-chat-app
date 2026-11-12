@@ -40,7 +40,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     useContext(UserContext);
   const { users: userList, setUsers: setUserList } =
     useContext(UserListContext);
-  const { messages, setMessages } = useContext(MessageContext);
+  const { messages, setMessages, setCallLogs } = useContext(MessageContext);
 
   useEffect(() => {
     if (isOpen) setNickname(selectedUser?.nickname || "");
@@ -174,6 +174,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
           setUserList(newUsers);
           setSelectedUser("");
           setMessages([]);
+          setCallLogs([]);
           toast.success(`You are left from "${data.name}"`);
           const response = {
             _id: data._id,
@@ -216,6 +217,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
           setUserList(newUsers);
           setSelectedUser("");
           setMessages([]);
+          setCallLogs([]);
           toast.success(res.message);
           const response = {
             _id: data._id,

@@ -19,8 +19,7 @@ const Messages = () => {
   const touchRef = useRef(null); // { id, x, y, dx, swiping, held }
   const { user } = useContext(AuthContext);
   const { user: conversationUser } = useContext(UserContext);
-  const { messages, setMessages } = useContext(MessageContext);
-  const [callLogs, setCallLogs] = useState([]);
+  const { messages, setMessages, callLogs, setCallLogs } = useContext(MessageContext);
   const [selectedIds, setSelectedIds] = useState([]);
   const [reactionFor, setReactionFor] = useState(null); // message whose reaction bar is open
   const [emojiPickerFor, setEmojiPickerFor] = useState(null);
@@ -48,7 +47,11 @@ const Messages = () => {
   useEffect(() => {
     const el = elementRef.current;
     if (!el) return;
-    const count = (messages || []).length + (callLogs || []).length;
+    const visibleCallLogs = (callLogs || []).filter((item) =>
+      String(item?.conversationId) === String(conversationUser?._id) &&
+      Boolean(item?.isGroup) === (Number(conversationUser?.is_group) === 1)
+    );
+    const count = (messages || []).length + visibleCallLogs.length;
     const added = count - lastCountRef.current;
     const firstLoad = lastCountRef.current === 0;
     lastCountRef.current = count;
@@ -58,7 +61,7 @@ const Messages = () => {
     } else if (added > 0) {
       setUnseen((n) => n + added);
     }
-  }, [messages, callLogs]);
+  }, [messages, callLogs, conversationUser?._id, conversationUser?.is_group]);
 
   const jumpToBottom = () => {
     const el = elementRef.current;
@@ -115,8 +118,6 @@ const Messages = () => {
       }
     };
     const refreshCallLogs = () => loadCallLogs();
-    if (conversationUser?._id) loadCallLogs();
-    else setCallLogs([]);
     window.addEventListener("chat:refresh-call-logs", refreshCallLogs);
     return () => {
       active = false;
@@ -470,9 +471,13 @@ const Messages = () => {
   const ownSelectedCount = selectedMessages.filter((msg) => msg?.sender?._id === user?._id).length;
   const receivedSelectedCount = selectedMessages.length - ownSelectedCount;
 
+  const visibleCallLogs = (callLogs || []).filter((item) =>
+    String(item?.conversationId) === String(conversationUser?._id) &&
+    Boolean(item?.isGroup) === (Number(conversationUser?.is_group) === 1)
+  );
   const timelineItems = [
     ...(messages || []).map((item) => ({ ...item, timelineType: "message" })),
-    ...(callLogs || []).map((item) => ({ ...item, timelineType: "call" })),
+    ...visibleCallLogs.map((item) => ({ ...item, timelineType: "call" })),
   ].sort((first, second) => {
     const firstAt = new Date(first.timelineType === "call" ? first.startedAt : first.message?.createdAt || 0).getTime();
     const secondAt = new Date(second.timelineType === "call" ? second.startedAt : second.message?.createdAt || 0).getTime();
@@ -630,6 +635,15 @@ const Messages = () => {
         </div>
       )}
       <div className="message-scroll" id="root" ref={elementRef}>
+        {!timelineItems.length && (
+          <div className="grid min-h-full place-items-center text-center text-sm text-[#91a0b7]">
+            <div>
+              <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-indigo-500/10 text-2xl text-indigo-300">✦</div>
+              <p className="font-medium text-[#e8edf7]">Start the conversation</p>
+              <p className="mt-1">Send a message, photo, or voice note.</p>
+            </div>
+          </div>
+        )}
         {timelineItems.map((data) => {
           if (data.timelineType === "call") {
             const outgoing = String(data.callerId) === String(user?._id);

@@ -13,7 +13,7 @@ export default function Login() {
   const router = useRouter();
   const { setUser } = useContext(AuthContext);
   const { setUser: setSelectedUser } = useContext(UserContext);
-  const { setMessages } = useContext(MessageContext);
+  const { setMessages, setCallLogs } = useContext(MessageContext);
   const [loading, setLoading] = useState(false);
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -67,6 +67,7 @@ export default function Login() {
       setUser(result.data);
       setSelectedUser("");
       setMessages([]);
+      setCallLogs([]);
       const redirectTo = new URLSearchParams(window.location.search).get("redirectTo");
       router.push(redirectTo?.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/");
     } catch (error) {

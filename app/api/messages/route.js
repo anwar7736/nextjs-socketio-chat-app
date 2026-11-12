@@ -2,6 +2,7 @@ import { mongoDB_connect } from "@/app/helpers/helper";
 import { getSessionUserId } from "@/app/lib/session";
 import { messageSchema } from "@/app/models/messageModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
+import { callLogSchema } from "@/app/models/callLogModel";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { groupSchema } from "@/app/models/groupModel";
 import { userSchema } from "@/app/models/userModel";
@@ -75,7 +76,7 @@ export async function GET(request) {
     };
   }
 
-  const data = await messageLogSchema.aggregate([
+  const messagePipeline = [
     { $match: match },
     { $sort: { createdAt: -1, _id: -1 } },
     ...(messageOffset ? [{ $skip: messageOffset }] : []),
@@ -122,6 +123,7 @@ export async function GET(request) {
         "group.name": 1,
         "group.photo": 1,
         "group.short_desc": 1,
+        "message._id": 1,
         "message.sender_id": 1,
         "message.message": 1,
         "message.type": 1,
@@ -142,7 +144,19 @@ export async function GET(request) {
         "receiver.photo": 1,
       },
     },
-    { $sort: { "message.createdAt": 1 } },
+    { $sort: { "message.createdAt": 1, "message._id": 1 } },
+  ];
+  const [data, callLogs] = await Promise.all([
+    messageLogSchema.aggregate(messagePipeline),
+    callLogSchema.find({
+      participants: currentUserId,
+      conversationId: referenceId,
+      isGroup,
+    })
+      .select("callId callerId conversationId isGroup isVideo status startedAt answeredAt endedAt durationSeconds")
+      .sort({ startedAt: -1 })
+      .limit(100)
+      .lean(),
   ]);
 
   const visibleData = data.filter((item) =>
@@ -213,6 +227,7 @@ export async function GET(request) {
   return NextResponse.json({
     success: true,
     data: enrichedData,
+    call_logs: callLogs,
     seen_events: seenEvents,
     ...(allMessages ? { has_more: data.length === messageLimit } : {}),
   });

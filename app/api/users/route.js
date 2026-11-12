@@ -226,7 +226,6 @@ export async function GET(request) {
                     ],
                 },
             },
-            { $sort: { createdAt: -1, _id: -1 } },
             { $lookup: { from: "messages", localField: "message_id", foreignField: "_id", as: "message" } },
             { $unwind: "$message" },
             {
@@ -235,7 +234,7 @@ export async function GET(request) {
                     "message.hiddenFor": { $nin: [authObjectId] },
                 },
             },
-            { $sort: { createdAt: -1, _id: -1 } },
+            { $sort: { "message.createdAt": -1, "message._id": -1 } },
             {
                 $group: {
                     _id: {
@@ -248,7 +247,7 @@ export async function GET(request) {
                     message_id: { $first: "$message_id" },
                     sender_id: { $first: "$sender_id" },
                     status: { $first: "$status" },
-                    createdAt: { $first: "$createdAt" },
+                    createdAt: { $first: "$message.createdAt" },
                     group_id: { $first: "$group_id" },
                     text: { $first: "$message.message" },
                     type: { $first: "$message.type" },

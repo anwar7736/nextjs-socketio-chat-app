@@ -17,7 +17,7 @@ import {
   activityFormat,
   auth,
   getImageURL,
-  loadMessages,
+  loadConversationTimeline,
   playMessageReminder,
   socket_connection,
 } from "./helpers/helper";
@@ -75,7 +75,7 @@ const Home = () => {
   const [activityNow, setActivityNow] = useState(Date.now());
   const { user, setUser } = useContext(UserContext);
   // const { user: authUser, setUser: setAuthUser } = useContext(AuthContext)
-  const { messages, setMessages } = useContext(MessageContext);
+  const { messages, setMessages, setCallLogs } = useContext(MessageContext);
   const [message, setMessage] = useState("");
   const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
@@ -317,6 +317,7 @@ const Home = () => {
       if (selectedConversationRef.current?._id) {
         setUser("");
         setMessages([]);
+        setCallLogs([]);
         return;
       }
       setExitConfirmationOpen(true);
@@ -330,7 +331,7 @@ const Home = () => {
         window.history.replaceState(state, "", window.location.href);
       }
     };
-  }, [authUser?._id, setMessages, setUser]);
+  }, [authUser?._id, setCallLogs, setMessages, setUser]);
 
   useEffect(() => {
     const hasConversation = Boolean(user?._id);
@@ -347,6 +348,7 @@ const Home = () => {
     }
     setUser("");
     setMessages([]);
+    setCallLogs([]);
   };
 
   useEffect(() => {
@@ -446,10 +448,13 @@ const Home = () => {
         if (!ticket) throw new Error("This conversation is unavailable.");
         if (cancelled) return;
         setUser(ticket);
-        const conversationMessages = await loadMessages(ticket);
-        if (!Array.isArray(conversationMessages)) throw new Error("Unable to load messages.");
+        setMessages([]);
+        setCallLogs([]);
+        const timeline = await loadConversationTimeline(ticket);
+        if (!Array.isArray(timeline.messages)) throw new Error("Unable to load messages.");
         if (cancelled) return;
-        setMessages(conversationMessages);
+        setMessages(timeline.messages);
+        setCallLogs(timeline.callLogs);
         window.history.replaceState(window.history.state, "", "/");
       } catch (error) {
         if (!cancelled) {
@@ -462,7 +467,7 @@ const Home = () => {
     };
     openTicket();
     return () => { cancelled = true; };
-  }, [authUser?._id, setMessages, setUser]);
+  }, [authUser?._id, setCallLogs, setMessages, setUser]);
 
   useEffect(() => {
     if (!authUser?._id) return;
@@ -535,7 +540,9 @@ const Home = () => {
         setShowPicker(false);
         if (messageInputRef.current) messageInputRef.current.style.height = "auto";
         // the socket server does not echo an event back to the tab that sent it
-        setMessages(await loadMessages(user));
+        const timeline = await loadConversationTimeline(user);
+        setMessages(timeline.messages);
+        setCallLogs(timeline.callLogs);
         getUserList({ showLoading: false });
       } else {
         setMessageError(res.message || "Unable to send message.");
@@ -616,13 +623,16 @@ const Home = () => {
       ) {
         const requestId = ++realtimeMessageRequestRef.current;
         try {
-          const res = await loadMessages(selectedConversation);
+          const timeline = await loadConversationTimeline(selectedConversation);
           const currentConversation = selectedConversationRef.current;
           if (
             requestId === realtimeMessageRequestRef.current &&
             currentConversation?._id === selectedConversation?._id &&
             Number(currentConversation?.is_group) === Number(selectedConversation?.is_group)
-          ) setMessages(res);
+          ) {
+            setMessages(timeline.messages);
+            setCallLogs(timeline.callLogs);
+          }
         } catch (error) {
           console.error("Unable to refresh messages after a real-time update:", error);
           toast.error("Unable to refresh this conversation. Check your connection.");
@@ -775,6 +785,7 @@ const Home = () => {
         if (user?._id === data?._id) {
           setUser("");
           setMessages([]);
+          setCallLogs([]);
         }
       } else {
         const newUser = {
@@ -804,6 +815,7 @@ const Home = () => {
       if (user._id === data?._id) {
         setUser("");
         setMessages([]);
+        setCallLogs([]);
       }
       let newUsers = users.filter((user) => user._id !== data?._id);
       setUsers(newUsers);
@@ -969,16 +981,8 @@ const Home = () => {
           {user ? (
             isConversationLoading ? (
               <MessageLoadingState />
-            ) : messages?.length > 0 ? (
-              <Messages key={user?._id} />
             ) : (
-              <div className="grid flex-1 place-items-center text-center text-sm text-[#91a0b7]">
-                <div>
-                  <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-indigo-500/10 text-2xl text-indigo-300">✦</div>
-                  <p className="font-medium text-[#e8edf7]">Start the conversation</p>
-                  <p className="mt-1">Send a message, photo, or voice note.</p>
-                </div>
-              </div>
+              <Messages key={user?._id} />
             )
           ) : (
             <div className="grid flex-1 place-items-center p-8 text-center">
