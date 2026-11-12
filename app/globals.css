@@ -65,7 +65,8 @@ textarea {
   left: 0;
   height: var(--chat-viewport-height, 100dvh);
   overflow: hidden;
-  overscroll-behavior: none;
+  /* no overscroll-behavior here: a pull at the top must reach the browser so pull-to-refresh works
+     (while typing, html/body.chat-input-focused still holds the page still) */
   padding: 18px;
 }
 
@@ -111,7 +112,6 @@ textarea {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 24px clamp(16px, 5vw, 72px);
   scrollbar-color: #394761 transparent;
 }
