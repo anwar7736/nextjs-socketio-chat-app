@@ -12,6 +12,8 @@ const callLogModel = new mongoose.Schema({
   answeredAt: Date,
   endedAt: Date,
   durationSeconds: { type: Number, default: 0 },
+  deletedFor: [{ type: mongoose.Schema.Types.ObjectId }],
+  deletedForEveryone: { type: Boolean, default: false },
 }, { timestamps: true });
 
 callLogModel.index({ participants: 1, conversationId: 1, isGroup: 1, startedAt: -1 });

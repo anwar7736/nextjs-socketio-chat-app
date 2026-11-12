@@ -8,6 +8,7 @@ const messageModel = new mongoose.Schema({
     "attachmentUrl": String,
     "attachmentName": String,
     "mimeType": String,
+    "durationSeconds": { type: Number, min: 0 },
     "reply_to": mongoose.Schema.Types.ObjectId,
     "editedAt": Date,
     "deletedForEveryone": { type: Boolean, default: false },

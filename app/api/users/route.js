@@ -255,6 +255,7 @@ export async function GET(request) {
                     text: { $first: "$message.message" },
                     type: { $first: "$message.type" },
                     attachmentName: { $first: "$message.attachmentName" },
+                    durationSeconds: { $first: "$message.durationSeconds" },
                 },
             },
         ])
@@ -265,6 +266,8 @@ export async function GET(request) {
                 $match: {
                     participants: authObjectId,
                     conversationId: { $in: data.map((item) => item._id) },
+                    deletedFor: { $ne: authObjectId },
+                    deletedForEveryone: { $ne: true },
                 },
             },
             { $sort: { startedAt: -1, _id: -1 } },
@@ -360,6 +363,7 @@ export async function GET(request) {
                     last_message: latest.text || "",
                     last_message_type: latest.type || "text",
                     last_message_attachment: latest.attachmentName || "",
+                    last_message_duration_seconds: latest.durationSeconds || 0,
                     last_message_sender_id: String(latest.sender_id),
                     last_message_status: Number(item.is_group) === 1
                         ? (groupSeenByMessage.get(String(latest.message_id)) || 0)

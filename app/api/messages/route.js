@@ -130,6 +130,7 @@ export async function GET(request) {
         "message.attachmentUrl": 1,
         "message.attachmentName": 1,
         "message.mimeType": 1,
+        "message.durationSeconds": 1,
         "message.reply_to": 1,
         "message.reactions": 1,
         "message.createdAt": 1,
@@ -152,6 +153,8 @@ export async function GET(request) {
       participants: currentUserId,
       conversationId: referenceId,
       isGroup,
+      deletedFor: { $ne: currentUserId },
+      deletedForEveryone: { $ne: true },
     })
       .select("callId callerId conversationId isGroup isVideo status startedAt answeredAt endedAt durationSeconds")
       .sort({ startedAt: -1 })
@@ -244,6 +247,7 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: "Invalid request body." }, { status: 400 });
   }
   const { receiver_id, is_group, attachmentUrl, attachmentName, mimeType, type } = body;
+  const durationSeconds = Number(body.durationSeconds);
   const replyTo = typeof body.reply_to === "string" && objectIdPattern.test(body.reply_to)
     ? new mongoose.Types.ObjectId(body.reply_to)
     : null;
@@ -258,6 +262,13 @@ export async function POST(request) {
   const allowedTypes = ["text", "image", "audio", "video", "file"];
   if (type && !allowedTypes.includes(type)) {
     return NextResponse.json({ success: false, message: "Invalid message type." }, { status: 400 });
+  }
+  if (
+    type === "audio" &&
+    body.durationSeconds != null &&
+    (!Number.isFinite(durationSeconds) || durationSeconds < 0 || durationSeconds > 7200)
+  ) {
+    return NextResponse.json({ success: false, message: "Invalid audio duration." }, { status: 400 });
   }
 
   await mongoDB_connect();
@@ -310,6 +321,9 @@ export async function POST(request) {
     attachmentUrl,
     attachmentName: typeof attachmentName === "string" ? attachmentName.slice(0, 180) : undefined,
     mimeType: typeof mimeType === "string" ? mimeType.slice(0, 100) : undefined,
+    ...(type === "audio" && Number.isFinite(durationSeconds) && durationSeconds > 0
+      ? { durationSeconds: Math.round(durationSeconds) }
+      : {}),
     ...(replyTo ? { reply_to: replyTo } : {}),
   });
 

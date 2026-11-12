@@ -30,6 +30,9 @@ const Messages = () => {
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState("default");
+  const [callDeleteTarget, setCallDeleteTarget] = useState(null);
+  const [callDeleteMode, setCallDeleteMode] = useState("for-me");
+  const [deletingCall, setDeletingCall] = useState(false);
   const [editingMessage, setEditingMessage] = useState(null);
   const [editText, setEditText] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
@@ -118,10 +121,16 @@ const Messages = () => {
       }
     };
     const refreshCallLogs = () => loadCallLogs();
+    const onCallLogDeleted = ({ callId }) => {
+      setCallLogs((current) => (current || []).filter((item) => item?.callId !== callId));
+      window.dispatchEvent(new Event("chat:refresh-conversations"));
+    };
     window.addEventListener("chat:refresh-call-logs", refreshCallLogs);
+    socket.on("call-log-deleted", onCallLogDeleted);
     return () => {
       active = false;
       window.removeEventListener("chat:refresh-call-logs", refreshCallLogs);
+      socket.off("call-log-deleted", onCallLogDeleted);
     };
   }, [conversationUser?._id, conversationUser?.is_group]);
 
@@ -188,6 +197,7 @@ const Messages = () => {
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       if (deleteConfirmationOpen) setDeleteConfirmationOpen(false);
+      else if (callDeleteTarget) setCallDeleteTarget(null);
       else if (reactionDetailsFor) setReactionDetailsFor(null);
       else if (emojiPickerFor) setEmojiPickerFor(null);
       else if (preview) closePreview();
@@ -195,7 +205,7 @@ const Messages = () => {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [preview, deleteConfirmationOpen, reactionDetailsFor, emojiPickerFor, closePreview, clearSelection]);
+  }, [preview, deleteConfirmationOpen, callDeleteTarget, reactionDetailsFor, emojiPickerFor, closePreview, clearSelection]);
 
   useEffect(() => {
     if (!emojiPickerFor) return;
@@ -278,6 +288,33 @@ const Messages = () => {
       toast.error(error.message || "Unable to remove a selected message.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const confirmDeleteCall = async () => {
+    if (!callDeleteTarget || deletingCall) return;
+    setDeletingCall(true);
+    try {
+      const response = await fetch("/api/calls/history", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId: callDeleteTarget.callId, mode: callDeleteMode }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to delete this call log.");
+      }
+      setCallLogs((current) =>
+        (current || []).filter((item) => item?.callId !== callDeleteTarget.callId)
+      );
+      if (result.socket_event) socket.emit("call-log-deleted", result.socket_event);
+      window.dispatchEvent(new Event("chat:refresh-conversations"));
+      setCallDeleteTarget(null);
+      toast.success(callDeleteMode === "everyone" ? "Call log deleted for everyone." : "Call log deleted for you.");
+    } catch (error) {
+      toast.error(error.message || "Unable to delete this call log.");
+    } finally {
+      setDeletingCall(false);
     }
   };
 
@@ -559,6 +596,79 @@ const Messages = () => {
                 <label><input type="radio" checked={deleteMode !== "for-me"} onChange={() => setDeleteMode("default")} /> Delete for everyone</label>
               </div>
             )}
+            {callDeleteTarget && (
+              <div
+                className="confirmation-overlay"
+                role="presentation"
+                onClick={(event) => {
+                  if (event.target === event.currentTarget && !deletingCall) setCallDeleteTarget(null);
+                }}
+              >
+                <section
+                  className="confirmation-dialog"
+                  role="alertdialog"
+                  aria-modal="true"
+                  aria-labelledby="call-delete-title"
+                  aria-describedby="call-delete-description"
+                >
+                  <button
+                    type="button"
+                    className="confirmation-close"
+                    onClick={() => setCallDeleteTarget(null)}
+                    aria-label="Close delete confirmation"
+                    disabled={deletingCall}
+                  >
+                    <FiX />
+                  </button>
+                  <h2 id="call-delete-title">Delete this call log?</h2>
+                  <p id="call-delete-description">
+                    {callDeleteMode === "everyone"
+                      ? "This call log will be removed for everyone in the conversation."
+                      : "This call log will be removed only from your conversation."}
+                  </p>
+                  {String(callDeleteTarget.callerId) === String(user?._id) && (
+                    <div className="confirmation-delete-options">
+                      <label>
+                        <input
+                          type="radio"
+                          checked={callDeleteMode === "for-me"}
+                          onChange={() => setCallDeleteMode("for-me")}
+                          disabled={deletingCall}
+                        />
+                        Delete for me
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          checked={callDeleteMode === "everyone"}
+                          onChange={() => setCallDeleteMode("everyone")}
+                          disabled={deletingCall}
+                        />
+                        Delete for everyone
+                      </label>
+                    </div>
+                  )}
+                  <div className="confirmation-actions">
+                    <button
+                      type="button"
+                      className="confirmation-cancel"
+                      onClick={() => setCallDeleteTarget(null)}
+                      disabled={deletingCall}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="confirmation-accept is-danger"
+                      onClick={confirmDeleteCall}
+                      disabled={deletingCall}
+                    >
+                      {deletingCall ? "Deleting…" : "Delete"}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            )}
             <div className="confirmation-actions">
               <button type="button" className="confirmation-cancel" onClick={() => setDeleteConfirmationOpen(false)}>
                 Cancel
@@ -671,23 +781,37 @@ const Messages = () => {
                 key={`call-${data.callId}`}
                 className={`message-row call-log-row ${outgoing ? "is-outgoing" : "is-incoming"} ${isMissed ? "is-missed" : ""}`}
               >
-                <button
-                  type="button"
-                  className="call-log-bubble"
-                  aria-label={`${mediaName} call: ${callStatus}`}
-                  onClick={() => window.dispatchEvent(new CustomEvent("chat:call-log-action", {
-                    detail: { callId: data.callId, isVideo: Boolean(data.isVideo) },
-                  }))}
-                >
-                  <span className="call-log-icon"><CallIcon /></span>
-                  <span className="call-log-copy">
-                    <strong>{isMissed ? `Missed ${mediaName.toLowerCase()} call` : `${mediaName} call`}</strong>
-                    <span>{callStatus}</span>
-                  </span>
-                  <time dateTime={validCallTime ? callStartedAt.toISOString() : undefined}>
-                    {validCallTime ? callStartedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""}
-                  </time>
-                </button>
+                <div className={`call-log-actions ${outgoing ? "is-outgoing" : "is-incoming"}`}>
+                  <button
+                    type="button"
+                    className="call-log-bubble"
+                    aria-label={`${mediaName} call: ${callStatus}`}
+                    onClick={() => window.dispatchEvent(new CustomEvent("chat:call-log-action", {
+                      detail: { callId: data.callId, isVideo: Boolean(data.isVideo) },
+                    }))}
+                  >
+                    <span className="call-log-icon"><CallIcon /></span>
+                    <span className="call-log-copy">
+                      <strong>{isMissed ? `Missed ${mediaName.toLowerCase()} call` : `${mediaName} call`}</strong>
+                      <span>{callStatus}</span>
+                    </span>
+                    <time dateTime={validCallTime ? callStartedAt.toISOString() : undefined}>
+                      {validCallTime ? callStartedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""}
+                    </time>
+                  </button>
+                  <button
+                    type="button"
+                    className="call-log-delete"
+                    aria-label="Delete call log"
+                    title="Delete call log"
+                    onClick={() => {
+                      setCallDeleteMode("for-me");
+                      setCallDeleteTarget(data);
+                    }}
+                  >
+                    <FiTrash2 />
+                  </button>
+                </div>
               </div>
             );
           }

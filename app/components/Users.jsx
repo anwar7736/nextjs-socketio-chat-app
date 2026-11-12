@@ -1,11 +1,39 @@
 import { useContext, useEffect, useRef, useState } from "react";
-import { FiArchive, FiMoreHorizontal, FiSlash } from "react-icons/fi";
+import {
+  FiArchive,
+  FiFile,
+  FiImage,
+  FiMic,
+  FiMoreHorizontal,
+  FiPhoneIncoming,
+  FiPhoneMissed,
+  FiPhoneOutgoing,
+  FiSlash,
+  FiVideo,
+} from "react-icons/fi";
 import { MdDone, MdDoneAll } from "react-icons/md";
 import { toast } from "sonner";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
 import { activityFormat, getImageURL, loadConversationTimeline } from "../helpers/helper";
 import { UserListContext } from "../contexts/UserListContext";
+
+const conversationDateLabel = (value) => {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const daysAgo = Math.floor((dayStart.getTime() - dateStart.getTime()) / 86400000);
+  if (daysAgo === 0) {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (daysAgo === 1) return "Yesterday";
+  if (daysAgo > 1 && daysAgo < 7) {
+    return date.toLocaleDateString([], { weekday: "long" });
+  }
+  return date.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
+};
 
 const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) => {
   const { user, setUser } = useContext(UserContext);
@@ -139,19 +167,42 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
       ) : (
         visibleUsers.length > 0 ? visibleUsers.map((contact) => {
           const isActive = activeUsers.includes(String(contact?._id));
+          const activityDate = conversationDateLabel(contact?.last_activity);
           const isCallPreview = contact?.last_activity_kind === "call";
           const isMissedCall = isCallPreview &&
-            ["no-answer", "declined"].includes(contact?.last_call_status);
+            contact?.last_call_status === "no-answer" &&
+            String(contact?.last_call_caller_id) !== String(user?._id);
           const mine = !isCallPreview && contact?.last_message_sender_id === user?._id;
+          const callType = contact?.last_call_is_video ? "Video call" : "Voice call";
+          const callLabel = isMissedCall
+            ? `Missed ${callType}`
+            : contact?.last_call_status === "no-answer"
+              ? `No answer · ${callType}`
+              : contact?.last_call_status === "declined"
+                ? `Declined · ${callType}`
+                : callType;
+          const audioDuration = Math.max(0, Number(contact?.last_message_duration_seconds) || 0);
+          const audioDurationLabel = audioDuration
+            ? ` (${Math.floor(audioDuration / 60)}:${String(audioDuration % 60).padStart(2, "0")})`
+            : "";
+          const mediaPreview = {
+            image: { Icon: FiImage, text: "Photo" },
+            audio: { Icon: FiMic, text: `Voice message${audioDurationLabel}` },
+            video: { Icon: FiVideo, text: "Video" },
+            file: { Icon: FiFile, text: contact?.last_message_attachment || "Attachment" },
+          }[contact?.last_message_type];
+          const PreviewIcon = isCallPreview
+            ? isMissedCall
+              ? FiPhoneMissed
+              : contact?.last_call_is_video
+                ? FiVideo
+                : String(contact?.last_call_caller_id) === String(user?._id)
+                  ? FiPhoneOutgoing
+                  : FiPhoneIncoming
+            : mediaPreview?.Icon;
           const preview = isCallPreview
-            ? `${isMissedCall ? "Missed " : ""}${contact?.last_call_is_video ? "Video call" : "Voice call"}`
-            : contact?.last_message || (
-            contact?.last_message_type === "image" ? "📷 Photo"
-              : contact?.last_message_type === "audio" ? "🎤 Voice message"
-                : contact?.last_message_type === "video" ? "🎥 Video"
-                  : contact?.last_message_attachment ? `📎 ${contact.last_message_attachment}`
-                    : ""
-            );
+            ? callLabel
+            : mediaPreview?.text || contact?.last_message || "";
           const preferenceKey = `${contact?.is_group ? "group" : "user"}:${contact?._id}`;
           return (
             <div
@@ -168,11 +219,22 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                   <img src={getImageURL(contact?.photo)} alt="" className="h-11 w-11 rounded-full border border-[#394761] object-cover" title={contact?.nickname || contact?.name} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center">
+                  <div className="flex min-w-0 items-center">
                     <span className="truncate text-sm font-semibold text-[#e8edf7]">{contact?.nickname || contact?.name}</span>
-                    {isActive && <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-400" aria-label="Online" />}
+                    {isActive && (
+                      <span
+                        className="ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-400"
+                        aria-label="Online"
+                        title={activityFormat(contact?.lastSeenAt || Date.now(), activityNow)}
+                      />
+                    )}
+                    {activityDate && (
+                      <span className="ml-auto shrink-0 pl-2 text-[11px] text-[#91a0b7]">
+                        {activityDate}
+                      </span>
+                    )}
                     {contact?.pending > 0 && (
-                      <span className="ml-auto shrink-0 rounded-full bg-indigo-500 px-2 py-0.5 text-xs text-white">{contact.pending}</span>
+                      <span className="ml-2 shrink-0 rounded-full bg-indigo-500 px-2 py-0.5 text-xs text-white">{contact.pending}</span>
                     )}
                   </div>
                   {preview && (
@@ -183,12 +245,13 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                       {contact?.is_group === 1 && contact?.last_message_sender_id && (
                         <span className="shrink-0">{mine ? "You:" : ""}</span>
                       )}
+                      {PreviewIcon && (
+                        <PreviewIcon
+                          className={`shrink-0 ${!isCallPreview && contact?.last_message_type === "audio" ? "text-emerald-400" : ""}`}
+                          aria-hidden="true"
+                        />
+                      )}
                       <span className="truncate">{preview}</span>
-                    </p>
-                  )}
-                  {contact?.is_group !== 1 && (
-                    <p className="mt-1 truncate text-xs text-[#91a0b7]">
-                      {isActive ? "Active now" : activityFormat(contact?.lastSeenAt, activityNow)}
                     </p>
                   )}
                   {(contact?.blocked || contact?.blockedByPartner) && (

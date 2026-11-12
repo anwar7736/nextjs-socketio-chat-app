@@ -84,12 +84,14 @@ const Home = () => {
   const [data, setData] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [attachment, setAttachment] = useState(null);
+  const [attachmentDuration, setAttachmentDuration] = useState(0);
   const [replyTarget, setReplyTarget] = useState(null);
   const [messageError, setMessageError] = useState("");
   const [attachmentError, setAttachmentError] = useState("");
   const [recording, setRecording] = useState(false);
   const [sending, setSending] = useState(false);
   const recorderRef = useRef(null);
+  const recordingStartedAtRef = useRef(0);
   const recordingTimerRef = useRef(null);
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
@@ -520,6 +522,7 @@ const Home = () => {
         attachmentUrl: uploaded?.url,
         attachmentName: uploaded?.name,
         mimeType: uploaded?.mimeType,
+        durationSeconds: attachmentDuration,
         reply_to: replyTarget?.message_id,
         type: uploaded?.mimeType?.startsWith("image/")
           ? "image"
@@ -539,6 +542,7 @@ const Home = () => {
         setMessage("");
         setReplyTarget(null);
         setAttachment(null);
+        setAttachmentDuration(0);
         setShowPicker(false);
         if (messageInputRef.current) messageInputRef.current.style.height = "auto";
         // the socket server does not echo an event back to the tab that sent it
@@ -576,16 +580,19 @@ const Home = () => {
       };
       recorder.onstop = () => {
         clearTimeout(recordingTimerRef.current);
+        const durationSeconds = Math.max(1, Math.round((Date.now() - recordingStartedAtRef.current) / 1000));
         const voiceNote = new File(chunks, `voice-note-${Date.now()}.webm`, {
           type: recorder.mimeType || "audio/webm",
         });
         setAttachment(voiceNote);
+        setAttachmentDuration(durationSeconds);
         setAttachmentError("");
         stream.getTracks().forEach((track) => track.stop());
         recorderRef.current = null;
         setRecording(false);
       };
       recorder.start();
+      recordingStartedAtRef.current = Date.now();
       recorderRef.current = recorder;
       setRecording(true);
       recordingTimerRef.current = setTimeout(() => {
@@ -867,6 +874,7 @@ const Home = () => {
   const chooseAttachment = async (file) => {
     if (!file) return;
     setAttachmentError("");
+    setAttachmentDuration(0);
     const type = (file.type || "").toLowerCase();
     const supportedImageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
     const isImage = type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i.test(file.name);
@@ -884,6 +892,33 @@ const Home = () => {
     if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
       setAttachmentError(`This file is too large. Files must be smaller than ${MAX_UPLOAD_MB} MB.`);
       return;
+    }
+    if (type.startsWith("audio/")) {
+      try {
+        const url = URL.createObjectURL(file);
+        const durationSeconds = await new Promise((resolve, reject) => {
+          const audio = new Audio();
+          const cleanup = () => {
+            audio.removeAttribute("src");
+            URL.revokeObjectURL(url);
+          };
+          audio.onloadedmetadata = () => {
+            const duration = Number.isFinite(audio.duration) ? Math.round(audio.duration) : 0;
+            cleanup();
+            resolve(duration);
+          };
+          audio.onerror = () => {
+            cleanup();
+            reject(new Error("Unable to read audio duration."));
+          };
+          audio.src = url;
+        });
+        setAttachmentDuration(durationSeconds);
+      } catch {
+        setAttachmentDuration(0);
+      }
+    } else {
+      setAttachmentDuration(0);
     }
     setAttachment(file);
   };
@@ -1007,7 +1042,7 @@ const Home = () => {
                   {attachment && (
                     <div className="mb-2 flex items-center justify-between rounded-xl border border-[#263248] bg-[#182235] px-3 py-2 text-sm text-[#c7d2e3]">
                       <span className="truncate">{attachment.name}</span>
-                      <button type="button" className="ml-3 text-rose-300" onClick={() => { setAttachment(null); setAttachmentError(""); }} aria-label="Remove attachment">×</button>
+                      <button type="button" className="ml-3 text-rose-300" onClick={() => { setAttachment(null); setAttachmentDuration(0); setAttachmentError(""); }} aria-label="Remove attachment">×</button>
                     </div>
                   )}
                   <ValidationError message={attachmentError} />

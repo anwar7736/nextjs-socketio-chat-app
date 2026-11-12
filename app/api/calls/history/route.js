@@ -1,3 +1,4 @@
+import { createHmac } from "crypto";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { mongoDB_connect } from "@/app/helpers/helper";
@@ -22,11 +23,75 @@ export async function GET(request) {
     return NextResponse.json({ success: false, message: "Invalid conversation type." }, { status: 400 });
   }
   await mongoDB_connect();
-  const query = { participants: new mongoose.Types.ObjectId(userId) };
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const query = {
+    participants: userObjectId,
+    deletedFor: { $ne: userObjectId },
+    deletedForEveryone: { $ne: true },
+  };
   if (conversationId) query.conversationId = new mongoose.Types.ObjectId(conversationId);
   if (isGroup !== null) query.isGroup = isGroup === "1";
   const data = await callLogSchema.find(query).sort({ startedAt: -1 }).limit(conversationId ? 100 : 50).lean();
   return NextResponse.json({ success: true, data });
+}
+
+export async function DELETE(request) {
+  const userId = await getSessionUserId(request);
+  if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ success: false, message: "Invalid request body." }, { status: 400 });
+  }
+  const callId = String(body?.callId || "");
+  const mode = body?.mode;
+  if (!callIdPattern.test(callId) || !["for-me", "everyone"].includes(mode)) {
+    return NextResponse.json({ success: false, message: "Invalid call log deletion." }, { status: 400 });
+  }
+
+  await mongoDB_connect();
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const log = await callLogSchema.findOne({
+    callId,
+    participants: userObjectId,
+    deletedFor: { $ne: userObjectId },
+    deletedForEveryone: { $ne: true },
+  }).select("callerId conversationId isGroup participants");
+  if (!log) return NextResponse.json({ success: false, message: "Call log not found." }, { status: 404 });
+
+  if (mode === "everyone" && !log.callerId.equals(userObjectId)) {
+    return NextResponse.json({ success: false, message: "Only the caller can delete this call log for everyone." }, { status: 403 });
+  }
+  const secret = process.env.AUTH_SECRET ||
+    (process.env.NODE_ENV !== "production" && "local-development-only-secret-change-before-deploy");
+  if (!secret) {
+    return NextResponse.json({ success: false, message: "Realtime call log deletion is not configured." }, { status: 500 });
+  }
+  if (mode === "everyone") {
+    await callLogSchema.updateOne(
+      { _id: log._id, deletedForEveryone: { $ne: true } },
+      { $set: { deletedForEveryone: true } }
+    );
+  } else {
+    await callLogSchema.updateOne(
+      { _id: log._id },
+      { $addToSet: { deletedFor: userObjectId } }
+    );
+  }
+
+  const event = {
+    actor_id: userId,
+    callId,
+    conversation_id: String(log.conversationId),
+    is_group: Boolean(log.isGroup),
+    recipient_ids: mode === "everyone" ? log.participants.map(String) : [userId],
+  };
+  const issuedAt = Date.now();
+  const signature = createHmac("sha256", secret)
+    .update(JSON.stringify({ event, issuedAt }))
+    .digest("base64url");
+  return NextResponse.json({ success: true, socket_event: { ...event, issuedAt, signature } });
 }
 
 export async function POST(request) {
