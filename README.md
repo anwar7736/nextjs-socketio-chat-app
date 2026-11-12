@@ -20,6 +20,24 @@ Resend requires `RESEND_API_KEY` and a verified `EMAIL_FROM`. Email registration
 
 Authenticator-based 2FA can be enabled or disabled under Profile settings. Disabling it requires a current authenticator code. Session cookies are signed, `HttpOnly`, and `Secure` in production.
 
+## Docker
+
+Build and run the production Next.js image from this directory. `NEXT_PUBLIC_SOCKET_URL` is compiled into the browser bundle at build time, so use the Socket.IO URL that browsers will reach:
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_SOCKET_URL=http://localhost:3002 \
+  -t convo-chat-web .
+docker run --name convo-chat-web \
+  --env-file .env.local \
+  -p 3001:3001 \
+  convo-chat-web
+```
+
+For production, replace the local Socket.IO URL with its public HTTPS origin. If using Web Push, pass `NEXT_PUBLIC_VAPID_PUBLIC_KEY` as a build argument too; it is a public key, not a secret. The runtime environment file must contain the server-side settings from `.env.example`, including `MONGODB_URI` (or the supported DB triplet) and the shared `AUTH_SECRET`. Do not copy environment files or secrets into the image. When MongoDB runs on the Docker host, use a host-reachable address rather than `localhost` from inside the container.
+
+The standalone image listens on port `3001`. Run the separately containerized Socket.IO server using the [Socket-Server Docker instructions](https://github.com/anwar7736/Socket-Server#docker).
+
 ## Chat features
 
 - Responsive dark chat and sign-in screens.
