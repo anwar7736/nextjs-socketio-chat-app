@@ -10,6 +10,24 @@ import { userSchema } from "@/app/models/userModel";
 const objectIdPattern = /^[a-f\d]{24}$/i;
 const callIdPattern = /^[a-f\d-]{36}$/i;
 
+function createCallLogEvent(log, actorId) {
+  const secret = process.env.AUTH_SECRET ||
+    (process.env.NODE_ENV !== "production" && "local-development-only-secret-change-before-deploy");
+  if (!secret) throw new Error("Realtime call history is not configured.");
+  const event = {
+    actor_id: actorId,
+    callId: log.callId,
+    conversation_id: String(log.conversationId),
+    is_group: Boolean(log.isGroup),
+    recipient_ids: log.participants.map(String),
+  };
+  const issuedAt = Date.now();
+  const signature = createHmac("sha256", secret)
+    .update(JSON.stringify({ event, issuedAt }))
+    .digest("base64url");
+  return { ...event, issuedAt, signature };
+}
+
 export async function GET(request) {
   const userId = await getSessionUserId(request);
   if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
@@ -134,7 +152,7 @@ export async function POST(request) {
     if (!participants.includes(userId) || participants.length > 8 || participants.some((id) => !allowedParticipants.includes(id))) {
       return NextResponse.json({ success: false, message: "Invalid call participants." }, { status: 400 });
     }
-    await callLogSchema.updateOne(
+    const log = await callLogSchema.findOneAndUpdate(
       { callId, callerId: userObjectId },
       {
         $setOnInsert: {
@@ -148,15 +166,17 @@ export async function POST(request) {
           startedAt: new Date(),
         },
       },
-      { upsert: true }
+      { upsert: true, new: true }
     );
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, socket_event: createCallLogEvent(log, userId) });
   }
 
   const log = await callLogSchema.findOne({ callId, participants: userObjectId });
   if (!log) return NextResponse.json({ success: false, message: "Call not found." }, { status: 404 });
   if (action === "answered") {
-    if (log.endedAt) return NextResponse.json({ success: true });
+    if (log.endedAt) {
+      return NextResponse.json({ success: true, socket_event: createCallLogEvent(log, userId) });
+    }
     log.status = "answered";
     if (!log.answeredAt) log.answeredAt = new Date();
   } else {
@@ -168,5 +188,5 @@ export async function POST(request) {
       : 0;
   }
   await log.save();
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, socket_event: createCallLogEvent(log, userId) });
 }

@@ -234,6 +234,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success) throw new Error(result.message || "Unable to update call history.");
+      if (result.socket_event) socket.emit("call-log-updated", result.socket_event);
       window.dispatchEvent(new Event("chat:refresh-call-logs"));
       return true;
     } catch (error) {
@@ -880,6 +881,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   useEffect(() => {
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
+    const onCallLogUpdated = () => loadCallHistory();
     const onInvite = async (invite) => {
       if (callRef.current || incomingRef.current) {
         socket.emit("call:reject", { callId: invite.callId, callerId: invite.callerId });
@@ -1049,6 +1051,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
 
     socket.on("call:invite", onInvite);
+    socket.on("call-log-updated", onCallLogUpdated);
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("call:participant", onParticipant);
@@ -1063,6 +1066,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     socket.on("call:media-status", onMediaStatus);
     return () => {
       socket.off("call:invite", onInvite);
+      socket.off("call-log-updated", onCallLogUpdated);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("call:participant", onParticipant);
