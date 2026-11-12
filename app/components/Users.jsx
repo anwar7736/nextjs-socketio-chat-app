@@ -175,9 +175,9 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
           const mine = !isCallPreview && contact?.last_message_sender_id === user?._id;
           const callType = contact?.last_call_is_video ? "Video call" : "Voice call";
           const callLabel = isMissedCall
-            ? `Missed ${callType}`
+            ? `Missed ${callType.replace(" call", " Call")}`
             : contact?.last_call_status === "no-answer"
-              ? `No answer · ${callType}`
+              ? callType
               : contact?.last_call_status === "declined"
                 ? `Declined · ${callType}`
                 : callType;
