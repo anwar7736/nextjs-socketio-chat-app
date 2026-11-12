@@ -1,6 +1,7 @@
 import { createHmac } from "crypto";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
+import { callLogConversationMatch, viewCallLog } from "@/app/lib/callLogs";
 import { mongoDB_connect } from "@/app/helpers/helper";
 import { getSessionUserId } from "@/app/lib/session";
 import { callLogSchema } from "@/app/models/callLogModel";
@@ -47,10 +48,15 @@ export async function GET(request) {
     deletedFor: { $ne: userObjectId },
     deletedForEveryone: { $ne: true },
   };
-  if (conversationId) query.conversationId = new mongoose.Types.ObjectId(conversationId);
-  if (isGroup !== null) query.isGroup = isGroup === "1";
+  if (conversationId && isGroup !== null) {
+    // a direct chat shows every call between the two people, whoever started it
+    Object.assign(query, callLogConversationMatch(userObjectId, new mongoose.Types.ObjectId(conversationId), isGroup === "1"));
+  } else {
+    if (conversationId) query.conversationId = new mongoose.Types.ObjectId(conversationId);
+    if (isGroup !== null) query.isGroup = isGroup === "1";
+  }
   const data = await callLogSchema.find(query).sort({ startedAt: -1 }).limit(conversationId ? 100 : 50).lean();
-  return NextResponse.json({ success: true, data });
+  return NextResponse.json({ success: true, data: data.map((log) => viewCallLog(log, userId)) });
 }
 
 export async function DELETE(request) {

@@ -10,6 +10,7 @@ import { sendPushNotification } from "@/app/lib/pushNotifications";
 import { createHmac } from "crypto";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
+import { callLogConversationMatch, viewCallLog } from "@/app/lib/callLogs";
 
 const objectIdPattern = /^[a-f\d]{24}$/i;
 
@@ -151,12 +152,11 @@ export async function GET(request) {
     messageLogSchema.aggregate(messagePipeline),
     callLogSchema.find({
       participants: currentUserId,
-      conversationId: referenceId,
-      isGroup,
+      ...callLogConversationMatch(currentUserId, referenceId, isGroup),
       deletedFor: { $ne: currentUserId },
       deletedForEveryone: { $ne: true },
     })
-      .select("callId callerId conversationId isGroup isVideo status startedAt answeredAt endedAt durationSeconds")
+      .select("callId callerId conversationId participants isGroup isVideo status startedAt answeredAt endedAt durationSeconds")
       .sort({ startedAt: -1 })
       .limit(100)
       .lean(),
@@ -230,7 +230,7 @@ export async function GET(request) {
   return NextResponse.json({
     success: true,
     data: enrichedData,
-    call_logs: callLogs,
+    call_logs: callLogs.map((log) => viewCallLog(log, sessionUserId)),
     seen_events: seenEvents,
     ...(allMessages ? { has_more: data.length === messageLimit } : {}),
   });

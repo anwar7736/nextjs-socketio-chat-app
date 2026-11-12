@@ -265,15 +265,30 @@ export async function GET(request) {
             {
                 $match: {
                     participants: authObjectId,
-                    conversationId: { $in: data.map((item) => item._id) },
                     deletedFor: { $ne: authObjectId },
                     deletedForEveryone: { $ne: true },
+                    // group calls by group id; direct calls by the other person, whoever started the call
+                    $or: [
+                        { isGroup: true, conversationId: { $in: data.filter((item) => Number(item.is_group) === 1).map((item) => item._id) } },
+                        { isGroup: false, participants: { $in: data.filter((item) => Number(item.is_group) === 0).map((item) => item._id) } },
+                    ],
+                },
+            },
+            {
+                $addFields: {
+                    viewerConversationId: {
+                        $cond: [
+                            "$isGroup",
+                            "$conversationId",
+                            { $arrayElemAt: [{ $filter: { input: "$participants", cond: { $ne: ["$$this", authObjectId] } } }, 0] },
+                        ],
+                    },
                 },
             },
             { $sort: { startedAt: -1, _id: -1 } },
             {
                 $group: {
-                    _id: { conversationId: "$conversationId", isGroup: "$isGroup" },
+                    _id: { conversationId: "$viewerConversationId", isGroup: "$isGroup" },
                     callerId: { $first: "$callerId" },
                     isVideo: { $first: "$isVideo" },
                     status: { $first: "$status" },
