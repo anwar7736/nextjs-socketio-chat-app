@@ -315,6 +315,12 @@ const Home = () => {
     addExitGuard();
 
     const handleBack = (event) => {
+      // the call screen handles this Back itself (back to the chat), or removed its own history entry
+      if (window.__convoIgnoreNextPop) {
+        window.__convoIgnoreNextPop = false;
+        return;
+      }
+      if (document.querySelector("[data-call-screen-open]")) return;
       if (allowAppExitRef.current || event.state?.convoChat || event.state?.nicknamesDialog) return;
       if (selectedConversationRef.current?._id) {
         setUser("");

@@ -756,9 +756,10 @@ form:has(> .print-container),
   display: flex;
   align-items: center;
   gap: 10px;
-  width: min(100%, 250px);
+  width: min(100%, 230px);
+  max-width: 230px; /* call log cards: at most 230px wide on every screen */
   min-width: 0;
-  flex: 1 1 250px;
+  flex: 0 1 230px;
   min-height: 66px;
   border: 1px solid rgb(148 163 184 / 12%);
   border-radius: 18px;

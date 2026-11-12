@@ -1149,6 +1149,30 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const incomingName = incomingPerson?.nickname || incoming?.callerName;
   const showVideoStage = call?.isVideo && remoteEntries.length > 0;
   const toggleVideoLayout = () => setLocalVideoExpanded((expanded) => !expanded);
+
+  // The phone Back button on the call screen does what the on-screen ← does: back to the chat, call keeps going
+  const callScreenOpen = Boolean(call) && !callMinimized;
+  useEffect(() => {
+    if (!callScreenOpen) return;
+    window.history.pushState({ ...(window.history.state || {}), callScreen: true }, "", window.location.href);
+    const onPop = () => {
+      setAudioMenuOpen(false);
+      setCallMinimized(true);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      // closed another way (on-screen ←, call ended): drop our history entry without the app reacting to it
+      if (window.history.state?.callScreen) {
+        window.__convoIgnoreNextPop = true;
+        window.history.back();
+      }
+    };
+  }, [callScreenOpen]);
+  const minimizeCallScreen = () => {
+    setAudioMenuOpen(false);
+    setCallMinimized(true);
+  };
   // only the small card swaps the videos (like WhatsApp); a tap on the big full-screen video does nothing
   const swapProps = (isSmallCard, label) => isSmallCard
     ? {
@@ -1230,6 +1254,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
           {call && (
             <div
+              data-call-screen-open={callMinimized ? undefined : "true"}
               className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""}`}
               role={callMinimized ? "region" : "dialog"}
               aria-modal={!callMinimized}
@@ -1296,10 +1321,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                   <button
                     type="button"
                     className="call-minimize-button"
-                    onClick={() => {
-                      setAudioMenuOpen(false);
-                      setCallMinimized(true);
-                    }}
+                    onClick={minimizeCallScreen}
                     aria-label="Back to conversation"
                     title="Back to conversation"
                   >
