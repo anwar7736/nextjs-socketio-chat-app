@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import Picker from "emoji-picker-react";
-import { FiArrowLeft, FiChevronDown, FiCornerUpLeft, FiCopy, FiEdit2, FiPhoneIncoming, FiPhoneMissed, FiPhoneOutgoing, FiPlus, FiTrash2, FiVideo, FiX } from "react-icons/fi";
+import { FiAlertCircle, FiArrowLeft, FiChevronDown, FiClock, FiCopy, FiCornerUpLeft, FiEdit2, FiPhoneIncoming, FiPhoneMissed, FiPhoneOutgoing, FiPlus, FiTrash2, FiVideo, FiX } from "react-icons/fi";
 import { dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
 import { AuthContext } from "../contexts/AuthContext";
 import { UserContext } from "../contexts/UserContext";
@@ -19,7 +19,9 @@ const Messages = () => {
   const touchRef = useRef(null); // { id, x, y, dx, swiping, held }
   const { user } = useContext(AuthContext);
   const { user: conversationUser } = useContext(UserContext);
-  const { messages, setMessages, callLogs, setCallLogs } = useContext(MessageContext);
+  const { messages, setMessages, callLogs, setCallLogs, pendingMessages } = useContext(MessageContext);
+  // messages this device is still sending in this conversation (shown at once, like WhatsApp)
+  const localMessages = (pendingMessages || []).filter((item) => item.conversationId === String(conversationUser?._id));
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectionType, setSelectionType] = useState(null);
   const [reactionFor, setReactionFor] = useState(null); // message whose reaction bar is open
@@ -66,6 +68,17 @@ const Messages = () => {
       setUnseen((n) => n + added);
     }
   }, [messages, callLogs, conversationUser?._id, conversationUser?.is_group]);
+
+  // sending a message always brings the chat to the bottom
+  const localCountRef = useRef(0);
+  useEffect(() => {
+    const el = elementRef.current;
+    if (el && localMessages.length > localCountRef.current) {
+      stickToBottomRef.current = true;
+      requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }));
+    }
+    localCountRef.current = localMessages.length;
+  }, [localMessages.length]);
 
   const jumpToBottom = () => {
     const el = elementRef.current;
@@ -564,7 +577,10 @@ const Messages = () => {
   const timelineItems = [
     ...(messages || []).map((item) => ({ ...item, timelineType: "message" })),
     ...visibleCallLogs.map((item) => ({ ...item, timelineType: "call" })),
+    ...localMessages.map((item) => ({ ...item, timelineType: "message" })),
   ].sort((first, second) => {
+    // messages still being sent stay at the bottom, in the order they were sent
+    if (Boolean(first.localState) !== Boolean(second.localState)) return first.localState ? 1 : -1;
     const firstAt = new Date(first.timelineType === "call" ? first.startedAt : first.message?.createdAt || 0).getTime();
     const secondAt = new Date(second.timelineType === "call" ? second.startedAt : second.message?.createdAt || 0).getTime();
     return firstAt - secondAt;
@@ -878,13 +894,15 @@ const Messages = () => {
           }, new Map());
           const repliedTo = (messages || []).find((item) => item?.message_id === data?.message?.reply_to);
           const dx = swipe.id === data?._id ? swipe.dx : 0;
+          const local = Boolean(data?.localState); // still sending (or failed): no actions until it is saved
           return (
             <div
               id={`message-${data?._id}`}
               key={data?._id}
-              className={`message-row ${reactions.length ? "mb-7" : "mb-4"} ${selected ? "is-selected" : ""} ${selecting ? "is-selecting" : ""}`}
+              className={`message-row ${reactions.length ? "mb-7" : "mb-4"} ${selected ? "is-selected" : ""} ${selecting ? "is-selecting" : ""} ${local ? `is-local is-${data.localState}` : ""}`}
               onClick={(event) => {
                 // in selection mode a tap anywhere on the row toggles it
+                if (local) return;
                 if (selecting && !event.target.closest(".message-bubble, .message-action-menu")) toggleSelected(data?._id);
               }}
             >
@@ -919,15 +937,15 @@ const Messages = () => {
                     style={dx ? { transform: `translateX(${dx}px)`, transition: "none" } : undefined}
                     onContextMenu={(event) => {
                       event.preventDefault();
-                      holdSelect(data); // right-click on desktop, long-press on Android
+                      if (!local) holdSelect(data); // right-click on desktop, long-press on Android
                     }}
-                    onTouchStart={(event) => onTouchStart(event, data)}
-                    onTouchMove={onTouchMove}
-                    onTouchEnd={(event) => onTouchEnd(event, data)}
-                    onTouchCancel={(event) => onTouchEnd(event, data)}
-                    onClick={(event) => onBubbleClick(event, data)}
+                    onTouchStart={local ? undefined : (event) => onTouchStart(event, data)}
+                    onTouchMove={local ? undefined : onTouchMove}
+                    onTouchEnd={local ? undefined : (event) => onTouchEnd(event, data)}
+                    onTouchCancel={local ? undefined : (event) => onTouchEnd(event, data)}
+                    onClick={local ? undefined : (event) => onBubbleClick(event, data)}
                   >
-                    {!selecting && (
+                    {!selecting && !local && (
                       <button
                         type="button"
                         className="message-more-button"
@@ -1037,7 +1055,17 @@ const Messages = () => {
                 )}
               </div>
               <div className={`mt-1 text-xs text-[#728099] ${mine ? "mr-10 text-right" : "ml-10"}`}>
-                {dateTimeFormat(data?.message?.createdAt)}
+                {data?.localState === "sending" && (
+                  <span className="message-local-status"><FiClock aria-hidden="true" /> Sending…</span>
+                )}
+                {data?.localState === "failed" && (
+                  <span className="message-local-status is-failed">
+                    <FiAlertCircle aria-hidden="true" /> Not sent{data.error ? ` · ${data.error}` : ""}
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("chat:retry-pending", { detail: data._id }))}>Retry</button>
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("chat:remove-pending", { detail: data._id }))}>Remove</button>
+                  </span>
+                )}
+                {!local && dateTimeFormat(data?.message?.createdAt)}
               </div>
               {mine && seenMessageIds.has(data?._id) && (
                 <div className="message-seen-avatars" aria-label="Seen by">

@@ -75,7 +75,7 @@ const Home = () => {
   const [activityNow, setActivityNow] = useState(Date.now());
   const { user, setUser } = useContext(UserContext);
   // const { user: authUser, setUser: setAuthUser } = useContext(AuthContext)
-  const { messages, setMessages, setCallLogs } = useContext(MessageContext);
+  const { messages, setMessages, setCallLogs, setPendingMessages } = useContext(MessageContext);
   const [message, setMessage] = useState("");
   const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
@@ -482,48 +482,52 @@ const Home = () => {
     return () => socket.off("connect", registerUser);
   }, [authUser?._id]);
 
-  const sendMessage = async (e) => {
-    e?.preventDefault();
-    stopTyping();
-    if (sending) return;
-    if (!message.trim() && !attachment) {
-      setMessageError("Enter a message or attach a file before sending.");
-      return;
-    }
-    if (message.trim().length > 5000) {
-      setMessageError("Messages can contain up to 5,000 characters.");
-      return;
-    }
-    setMessageError("");
-    setAttachmentError("");
-    setSending(true);
+  // ---- Sending, like WhatsApp: the message shows at once ("Sending…"), goes out in the background one at a
+  // time in order, and is replaced by the saved copy. The receiver gets it exactly as before (socket broadcast).
+  const sendQueueRef = useRef(Promise.resolve());
+  const pendingInputsRef = useRef(new Map()); // local id -> what was typed/attached, kept for Retry
+
+  const removePending = useCallback((localId) => {
+    const input = pendingInputsRef.current.get(localId);
+    if (input?.previewUrl) setTimeout(() => URL.revokeObjectURL(input.previewUrl), 5000);
+    pendingInputsRef.current.delete(localId);
+    setPendingMessages((list) => list.filter((item) => item._id !== localId));
+  }, [setPendingMessages]);
+
+  const deliverPending = async (localId) => {
+    const input = pendingInputsRef.current.get(localId);
+    if (!input) return;
+    const { conversation } = input;
+    const markFailed = (error) => setPendingMessages((list) => list.map((item) =>
+      item._id === localId ? { ...item, localState: "failed", error } : item
+    ));
     try {
       let uploaded = null;
-      if (attachment) {
+      if (input.file) {
         const uploadData = new FormData();
-        uploadData.append("file", attachment);
+        uploadData.append("file", input.file);
         const uploadResponse = await fetch("/api/upload", { method: "POST", body: uploadData });
         // the host can refuse a too-large body before the app runs, with a non-JSON page
         const uploadResult = await uploadResponse.json().catch(() => ({}));
         if (!uploadResponse.ok || !uploadResult.success) {
-          setAttachmentError(uploadResult.message || (uploadResponse.status === 413
-            ? `This file is too large. Files must be smaller than ${MAX_UPLOAD_MB} MB.`
-            : "Unable to upload this file. Please try again."));
+          markFailed(uploadResult.message || (uploadResponse.status === 413
+            ? `File larger than ${MAX_UPLOAD_MB} MB`
+            : "Upload failed"));
           return;
         }
         uploaded = uploadResult.data;
       }
 
       const data = {
-        message: message,
+        message: input.text,
         sender_id: authUser?._id,
-        receiver_id: user?._id,
-        is_group: user?.is_group,
+        receiver_id: conversation?._id,
+        is_group: conversation?.is_group,
         attachmentUrl: uploaded?.url,
         attachmentName: uploaded?.name,
         mimeType: uploaded?.mimeType,
-        durationSeconds: attachmentDuration,
-        reply_to: replyTarget?.message_id,
+        durationSeconds: input.durationSeconds,
+        reply_to: input.replyTo,
         type: uploaded?.mimeType?.startsWith("image/")
           ? "image"
           : uploaded?.mimeType?.startsWith("audio/")
@@ -536,28 +540,112 @@ const Home = () => {
         method: "POST",
         body: JSON.stringify(data),
       });
-      const res = await response.json();
-      if (response.ok && res.success) {
-        socket.emit("private-message", JSON.stringify(res.data));
-        setMessage("");
-        setReplyTarget(null);
-        setAttachment(null);
-        setAttachmentDuration(0);
-        setShowPicker(false);
-        if (messageInputRef.current) messageInputRef.current.style.height = "auto";
-        // the socket server does not echo an event back to the tab that sent it
-        const timeline = await loadConversationTimeline(user);
-        setMessages(timeline.messages);
-        setCallLogs(timeline.callLogs);
-        getUserList({ showLoading: false });
-      } else {
-        setMessageError(res.message || "Unable to send message.");
+      const res = await response.json().catch(() => ({}));
+      if (!response.ok || !res.success) {
+        markFailed(res.message || "Unable to send");
+        return;
       }
+      socket.emit("private-message", JSON.stringify(res.data));
+      // the socket server does not echo an event back to the tab that sent it: load the saved copy
+      if (String(selectedConversationRef.current?._id) === String(conversation?._id)) {
+        const timeline = await loadConversationTimeline(conversation);
+        if (String(selectedConversationRef.current?._id) === String(conversation?._id)) {
+          setMessages(timeline.messages);
+          setCallLogs(timeline.callLogs);
+        }
+      }
+      removePending(localId);
+      getUserList({ showLoading: false });
     } catch (error) {
-      setMessageError("Unable to send this message. Check your connection and try again.");
-    } finally {
-      setSending(false);
+      markFailed("Check your connection");
     }
+  };
+
+  const queuePending = (localId) => {
+    sendQueueRef.current = sendQueueRef.current
+      .then(() => deliverPending(localId))
+      .catch((error) => console.error("Unable to send a queued message:", error));
+  };
+
+  useEffect(() => {
+    const onRetry = (event) => {
+      const localId = event.detail;
+      if (!pendingInputsRef.current.has(localId)) return;
+      setPendingMessages((list) => list.map((item) =>
+        item._id === localId ? { ...item, localState: "sending", error: "" } : item
+      ));
+      queuePending(localId);
+    };
+    const onRemove = (event) => removePending(event.detail);
+    window.addEventListener("chat:retry-pending", onRetry);
+    window.addEventListener("chat:remove-pending", onRemove);
+    return () => {
+      window.removeEventListener("chat:retry-pending", onRetry);
+      window.removeEventListener("chat:remove-pending", onRemove);
+    };
+  });
+
+  const sendMessage = async (e) => {
+    e?.preventDefault();
+    stopTyping();
+    if (!message.trim() && !attachment) {
+      setMessageError("Enter a message or attach a file before sending.");
+      return;
+    }
+    if (message.trim().length > 5000) {
+      setMessageError("Messages can contain up to 5,000 characters.");
+      return;
+    }
+    if (!user?._id) return;
+    setMessageError("");
+    setAttachmentError("");
+
+    const localId = `local-${crypto.randomUUID()}`;
+    const file = attachment;
+    const previewUrl = file ? URL.createObjectURL(file) : undefined;
+    const fileType = (file?.type || "").toLowerCase();
+    const isGroup = Number(user?.is_group) === 1;
+    pendingInputsRef.current.set(localId, {
+      conversation: user,
+      text: message,
+      file,
+      previewUrl,
+      durationSeconds: attachmentDuration,
+      replyTo: replyTarget?.message_id,
+    });
+    setPendingMessages((list) => [...list, {
+      _id: localId,
+      message_id: localId,
+      localState: "sending",
+      conversationId: String(user._id),
+      status: 1,
+      sender: { _id: authUser?._id, name: authUser?.name, photo: authUser?.photo },
+      receiver: { _id: user._id },
+      ...(isGroup ? { group: { _id: user._id, name: user.name } } : {}),
+      message: {
+        message: message.trim(),
+        type: fileType.startsWith("image/") ? "image"
+          : fileType.startsWith("audio/") ? "audio"
+            : fileType.startsWith("video/") ? "video"
+              : file ? "file" : "text",
+        attachmentUrl: previewUrl,
+        attachmentName: file?.name,
+        mimeType: file?.type,
+        durationSeconds: attachmentDuration,
+        reply_to: replyTarget?.message_id,
+        createdAt: new Date().toISOString(),
+        reactions: [],
+      },
+    }]);
+
+    // the composer is free again at once: the next message can be typed while this one goes out
+    setMessage("");
+    setReplyTarget(null);
+    setAttachment(null);
+    setAttachmentDuration(0);
+    setShowPicker(false);
+    if (messageInputRef.current) messageInputRef.current.style.height = "auto";
+    queuePending(localId);
   };
 
   const toggleVoiceRecording = async () => {

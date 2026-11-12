@@ -2606,3 +2606,42 @@ button.nickname-person:hover {
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+/* a message this device is still sending ("Sending…") or could not send ("Not sent · Retry · Remove") */
+.message-row.is-local .message-bubble {
+  opacity: 0.75;
+}
+
+.message-row.is-failed .message-bubble {
+  opacity: 1;
+  box-shadow: 0 0 0 1px rgb(244 63 94 / 55%);
+}
+
+.message-local-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.message-local-status svg {
+  width: 12px;
+  height: 12px;
+}
+
+.message-local-status.is-failed {
+  color: #fda4af;
+}
+
+.message-local-status button {
+  border-radius: 8px;
+  padding: 2px 8px;
+  background: rgb(255 255 255 / 8%);
+  color: #e8edf7;
+  font-weight: 600;
+}
+
+.message-local-status button:hover {
+  background: rgb(255 255 255 / 16%);
+}
