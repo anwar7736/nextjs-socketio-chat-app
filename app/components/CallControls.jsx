@@ -1169,6 +1169,57 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       }
     };
   }, [callScreenOpen]);
+  // the small "call in progress" bar can be dragged anywhere on screen (a tap still presses its buttons)
+  const [miniOffset, setMiniOffset] = useState({ x: 0, y: 0 });
+  const miniDragRef = useRef(null);
+  const suppressMiniClickRef = useRef(false);
+  const onMiniPointerDown = (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    const screen = event.currentTarget.closest(".call-screen");
+    if (!screen) return;
+    miniDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      base: miniOffset,
+      rect: screen.getBoundingClientRect(),
+      moved: false,
+    };
+  };
+  useEffect(() => {
+    if (!callMinimized) return;
+    const onMove = (event) => {
+      const drag = miniDragRef.current;
+      if (!drag) return;
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < 6) return; // a tap, not a drag
+      drag.moved = true;
+      event.preventDefault();
+      const margin = 8;
+      const clampedX = Math.min(window.innerWidth - margin - drag.rect.right, Math.max(margin - drag.rect.left, dx));
+      const clampedY = Math.min(window.innerHeight - margin - drag.rect.bottom, Math.max(margin - drag.rect.top, dy));
+      setMiniOffset({ x: drag.base.x + clampedX, y: drag.base.y + clampedY });
+    };
+    const onUp = () => {
+      if (miniDragRef.current?.moved) suppressMiniClickRef.current = true; // the release is not a button press
+      miniDragRef.current = null;
+    };
+    const onResize = () => setMiniOffset({ x: 0, y: 0 }); // rotated/resized: back to its corner, never off screen
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [callMinimized]);
+  useEffect(() => {
+    if (!call) setMiniOffset({ x: 0, y: 0 });
+  }, [call]);
+
   const minimizeCallScreen = () => {
     setAudioMenuOpen(false);
     setCallMinimized(true);
@@ -1259,6 +1310,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               role={callMinimized ? "region" : "dialog"}
               aria-modal={!callMinimized}
               aria-label={callMinimized ? "Call in progress" : "Call"}
+              // `translate` (not `transform`): the bar's pop-in animation keeps its own transform
+              style={callMinimized ? { translate: `${miniOffset.x}px ${miniOffset.y}px` } : undefined}
             >
               {/* exactly one sound source per person: the visible video plays it (as in the version that
                   worked); a plain audio element only when there is no visible video (voice call, camera off, minimized) */}
@@ -1298,7 +1351,17 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               )}
 
               {callMinimized ? (
-                <div className="call-mini-bar">
+                <div
+                  className="call-mini-bar"
+                  onPointerDown={onMiniPointerDown}
+                  onClickCapture={(event) => {
+                    if (!suppressMiniClickRef.current) return;
+                    suppressMiniClickRef.current = false;
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  title="Drag to move"
+                >
                   <button type="button" className="call-mini-main" onClick={() => setCallMinimized(false)} aria-label={`Return to ${callName || "call"}`}>
                     <span className="call-mini-pulse" />
                     <span className="call-mini-text">{callName || "Call"} · {statusText}</span>

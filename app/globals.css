@@ -2671,3 +2671,14 @@ button.nickname-person:hover {
   top: 8px;
   bottom: auto;
 }
+
+/* the small call bar can be dragged: the page must not scroll under the finger */
+.call-mini-bar {
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.call-mini-bar:active {
+  cursor: grabbing;
+}

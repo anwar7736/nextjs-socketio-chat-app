@@ -156,13 +156,17 @@ const Home = () => {
     typingActiveRef.current = false;
   }, [emitTypingStatus, user]);
 
+  const lastTypingEmitRef = useRef(0);
   const handleMessageTyping = (value) => {
     if (!value.trim()) {
       stopTyping();
       return;
     }
-    if (!typingActiveRef.current) {
+    // say "typing" at the start and again every 2.5 s while typing goes on
+    // (the other side hides it 4 s after the last notice)
+    if (!typingActiveRef.current || Date.now() - lastTypingEmitRef.current > 2500) {
       typingActiveRef.current = true;
+      lastTypingEmitRef.current = Date.now();
       emitTypingStatus(true);
     }
     clearTimeout(typingTimerRef.current);
@@ -180,9 +184,12 @@ const Home = () => {
     const typingTimers = typingUsersTimersRef.current;
     const onTypingStatus = (event) => {
       const conversation = selectedConversationRef.current;
-      const sameConversation =
-        String(event?.receiver_id) === String(conversation?._id) &&
-        Boolean(event?.is_group) === (Number(conversation?.is_group) === 1);
+      const isGroup = Number(conversation?.is_group) === 1;
+      // group: the event names the group; direct chat: it names ME as receiver, so the open chat must be the sender
+      const sameConversation = Boolean(event?.is_group) === isGroup && (isGroup
+        ? String(event?.receiver_id) === String(conversation?._id)
+        : String(event?.sender_id) === String(conversation?._id) &&
+          String(event?.receiver_id) === String(authUserRef.current?._id));
       if (!sameConversation || !event?.sender_id) return;
 
       const senderId = String(event.sender_id);
