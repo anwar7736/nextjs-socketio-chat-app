@@ -733,6 +733,10 @@ form:has(> .print-container),
   display: flex;
 }
 
+.call-log-row.is-incoming {
+  justify-content: flex-start;
+}
+
 .call-log-row.is-outgoing {
   justify-content: flex-end;
 }
@@ -741,7 +745,7 @@ form:has(> .print-container),
   display: flex;
   align-items: center;
   gap: 10px;
-  width: min(100%, 280px);
+  width: min(100%, 250px);
   min-height: 66px;
   border: 1px solid rgb(148 163 184 / 12%);
   border-radius: 18px;
