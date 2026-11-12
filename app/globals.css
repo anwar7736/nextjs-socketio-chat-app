@@ -2441,6 +2441,10 @@ button.nickname-person:hover {
     padding: 18px 14px;
   }
 
+  .call-log-bubble {
+    width: min(100%, 230px);
+  }
+
   .message-loading-state {
     padding: 18px 14px;
   }
