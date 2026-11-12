@@ -409,17 +409,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const existing = peersRef.current.get(peerId);
     if (existing) return existing;
     const peer = new RTCPeerConnection({ iceServers: iceServersRef.current, iceCandidatePoolSize: 2 });
-    localStreamRef.current?.getTracks().forEach((track) => {
-      const sender = peer.addTrack(track, localStreamRef.current);
-      const parameters = sender.getParameters();
-      if (parameters.encodings?.length) {
-        parameters.encodings[0].priority = track.kind === "audio" ? "high" : "medium";
-      }
-      if (track.kind === "video") parameters.degradationPreference = "maintain-framerate";
-      sender.setParameters(parameters).catch((error) => {
-        console.debug("Unable to set call media priority:", error);
-      });
-    });
+    // plain addTrack, as in the version that worked: changing sender parameters before the call is
+    // negotiated is handled differently by Safari/iPhone and can leave the call silent
+    localStreamRef.current?.getTracks().forEach((track) => peer.addTrack(track, localStreamRef.current));
     peer.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit("call:signal", { callId, to: peerId, signal: { candidate: event.candidate.toJSON() } });
@@ -1194,8 +1186,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               aria-modal={!callMinimized}
               aria-label={callMinimized ? "Call in progress" : "Call"}
             >
+              {/* exactly one sound source per person: the visible video plays it (as in the version that
+                  worked); a plain audio element only when there is no visible video (voice call, camera off, minimized) */}
               <div className="call-audio-layer" aria-hidden="true">
-                {remoteEntries.map(([id, stream]) => <RemoteAudio key={id} stream={stream} />)}
+                {remoteEntries
+                  .filter(([id]) => !(showVideoStage && !callMinimized && !remoteMedia[id]?.cameraOff))
+                  .map(([id, stream]) => <RemoteAudio key={id} stream={stream} />)}
               </div>
               {showVideoStage && (
                 <div
@@ -1432,7 +1428,8 @@ function CallVideo({ stream, label, photo, muted, cameraOff, minimized }) {
         </div>
       ) : (
         <>
-          <video ref={videoRef} autoPlay playsInline muted />
+          {/* minimized: the audio element plays this person instead, so the video stays silent (no echo) */}
+          <video ref={videoRef} autoPlay playsInline muted={minimized} />
           <span>{label}</span>
           {muted && <span className="call-tile-muted">Muted</span>}
         </>
@@ -1467,5 +1464,5 @@ function RemoteAudio({ stream }) {
       window.removeEventListener("pageshow", resumePlayback);
     };
   }, [stream]);
-  return <audio ref={audioRef} autoPlay />;
+  return <audio ref={audioRef} autoPlay playsInline />;
 }
