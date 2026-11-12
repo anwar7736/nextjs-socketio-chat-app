@@ -791,18 +791,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   };
 
   /* ---------- sounds & vibration ---------- */
-  useTone("ring", Boolean(incoming)); // loops for as long as the call rings (45 s at most, set by the socket server)
+  // the call rings until someone answers, declines or the caller cancels (like WhatsApp/Messenger)
+  useTone("ring", Boolean(incoming));
   useTone("ringback", call?.status === "ringing");
   useTone("busy", Boolean(ended?.tone), false);
 
+  // the phone vibrates for as long as it rings
   useEffect(() => {
     if (!incoming || !navigator.vibrate) return;
     navigator.vibrate([400, 200, 400]);
     const interval = setInterval(() => navigator.vibrate([400, 200, 400]), 2600);
-    const stopVibrating = setTimeout(() => clearInterval(interval), 5200);
     return () => {
       clearInterval(interval);
-      clearTimeout(stopVibrating);
       navigator.vibrate(0);
     };
   }, [incoming]);
