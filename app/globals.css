@@ -2597,4 +2597,12 @@ button.nickname-person:hover {
   max-width: min(92vw, 520px);
   margin-top: 8px;
   border-radius: 10px;
-  background: rgb(0 0 0 / 35
+  background: rgb(0 0 0 / 35%);
+  padding: 6px 10px;
+  color: #c7d2e3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
