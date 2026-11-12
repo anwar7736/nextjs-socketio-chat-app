@@ -2645,3 +2645,28 @@ button.nickname-person:hover {
 .message-local-status button:hover {
   background: rgb(255 255 255 / 16%);
 }
+
+/* "Muted" under the name at the top of the call screen (voice and video) */
+.call-muted-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: rgb(225 29 72 / 85%);
+  padding: 4px 12px;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  text-shadow: none;
+}
+
+/* a full-screen partner video shows "Muted" at the top instead; group tiles show it at the top of each tile */
+.call-stage:not(.is-inset):not(.is-grid) .call-tile-muted {
+  display: none;
+}
+
+.call-stage.is-grid .call-tile .call-tile-muted {
+  top: 8px;
+  bottom: auto;
+}

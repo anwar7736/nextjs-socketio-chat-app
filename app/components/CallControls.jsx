@@ -1315,7 +1315,16 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     )}
                     <h2 className="call-name">{callName || "Call"}</h2>
                     <p className="call-status">{statusText}</p>
-                    {Object.entries(remoteMedia).some(([, state]) => state.muted) && !showVideoStage && <p className="call-sub">Muted</p>}
+                    {(() => {
+                      // who muted their microphone: shown under the name in voice AND video calls (in a video call
+                      // the tile badge sat behind the control bar)
+                      const mutedIds = Object.entries(remoteMedia).filter(([, state]) => state.muted).map(([id]) => id);
+                      if (!mutedIds.length) return null;
+                      const text = call.isGroup
+                        ? `${mutedIds.map((id) => personFor(id)?.nickname || personFor(id)?.name || "Someone").join(", ")} muted`
+                        : "Muted";
+                      return <p className="call-muted-pill"><FiMicOff aria-hidden="true" /> {text}</p>;
+                    })()}
                     {call.connectedAt && !call.mediaConnected && <p className="call-sub">Connecting audio…</p>}
                     {call.connectedAt && !call.mediaConnected && elapsedSeconds >= 5 && (
                       <p className="call-debug">
