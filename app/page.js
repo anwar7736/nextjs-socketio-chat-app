@@ -101,6 +101,8 @@ const Home = () => {
   const typingUsersTimersRef = useRef(new Map());
   const mutedConversationsRef = useRef(new Set());
   const conversationHistoryRef = useRef(false);
+  const realtimeMessageRequestRef = useRef(0);
+  const conversationRefreshTimerRef = useRef(null);
   useEffect(() => {
     const updateMuted = (event) => {
       const { conversationId, muted } = event.detail || {};
@@ -384,10 +386,19 @@ const Home = () => {
   getUserListRef.current = getUserList;
 
   useEffect(() => {
-    const refreshConversations = () => getUserList({ showLoading: false });
+    const refreshConversations = () => {
+      clearTimeout(conversationRefreshTimerRef.current);
+      conversationRefreshTimerRef.current = setTimeout(
+        () => getUserListRef.current({ showLoading: false }),
+        60
+      );
+    };
     window.addEventListener("chat:refresh-conversations", refreshConversations);
-    return () => window.removeEventListener("chat:refresh-conversations", refreshConversations);
-  }, [getUserList]);
+    return () => {
+      clearTimeout(conversationRefreshTimerRef.current);
+      window.removeEventListener("chat:refresh-conversations", refreshConversations);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user?._id || user?.is_group === 1) return;
@@ -588,12 +599,13 @@ const Home = () => {
       const notificationConversationId = isGroup
         ? data?.receiver_id
         : String(data?.sender_id) === String(authUser?._id) ? data?.receiver_id : data?.sender_id;
-      const sameOpenConversation = Boolean(user?._id) &&
-        Number(user?.is_group) === Number(data?.is_group) &&
+      const selectedConversation = selectedConversationRef.current;
+      const sameOpenConversation = Boolean(selectedConversation?._id) &&
+        Number(selectedConversation?.is_group) === Number(data?.is_group) &&
         (isGroup
-          ? String(user?._id) === String(data?.receiver_id)
-          : String(user?._id) === String(data?.sender_id) ||
-            String(user?._id) === String(data?.receiver_id));
+          ? String(selectedConversation?._id) === String(data?.receiver_id)
+          : String(selectedConversation?._id) === String(data?.sender_id) ||
+            String(selectedConversation?._id) === String(data?.receiver_id));
       const shouldPlayReminder =
         String(data?.sender_id) !== String(authUser?._id) &&
         !sameOpenConversation &&
@@ -602,9 +614,21 @@ const Home = () => {
       if (
         sameOpenConversation
       ) {
-        let res = await loadMessages(user);
-        setMessages(res);
-        window.dispatchEvent(new Event("chat:refresh-conversations"));
+        const requestId = ++realtimeMessageRequestRef.current;
+        try {
+          const res = await loadMessages(selectedConversation);
+          const currentConversation = selectedConversationRef.current;
+          if (
+            requestId === realtimeMessageRequestRef.current &&
+            currentConversation?._id === selectedConversation?._id &&
+            Number(currentConversation?.is_group) === Number(selectedConversation?.is_group)
+          ) setMessages(res);
+        } catch (error) {
+          console.error("Unable to refresh messages after a real-time update:", error);
+          toast.error("Unable to refresh this conversation. Check your connection.");
+        } finally {
+          window.dispatchEvent(new Event("chat:refresh-conversations"));
+        }
       } else if (
         String(data?.receiver_id) === String(authUser?._id) ||
         String(data?.sender_id) === String(authUser?._id) ||
@@ -719,6 +743,7 @@ const Home = () => {
           ? item
           : { ...item, seen_by: [...seenBy, viewer] };
       }));
+      window.dispatchEvent(new Event("chat:refresh-conversations"));
     });
 
     socket.off("add-group");

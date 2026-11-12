@@ -250,6 +250,7 @@ const Messages = () => {
     } else {
       setMessages((current) => (current || []).filter((item) => item?._id !== msg?._id));
     }
+    window.dispatchEvent(new Event("chat:refresh-conversations"));
   };
 
   const openDeleteConfirmation = () => {
