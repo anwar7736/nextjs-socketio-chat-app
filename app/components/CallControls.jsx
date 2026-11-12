@@ -137,7 +137,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const callRef = useRef(null);
   const callSetupRef = useRef(null);
   const endTimerRef = useRef(null);
-  const iceServersRef = useRef([{ urls: "stun:stun.l.google.com:19302" }]);
+  const iceServersRef = useRef([
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+    { urls: "stun:stun.cloudflare.com:3478" },
+  ]);
   const iceServersLoadedAtRef = useRef(0);
   const iceServersRequestRef = useRef(null);
   const currentUserIdRef = useRef(currentUser?._id);
@@ -427,7 +430,29 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       if (stream) setRemoteStreams((streams) => ({ ...streams, [peerId]: stream }));
     };
     let restarts = 0;
+    let disconnectTimer = null;
     peer.onconnectionstatechange = async () => {
+      if (peer.connectionState === "connected") {
+        clearTimeout(disconnectTimer);
+        const active = callRef.current;
+        if (active && active.callId === callId && !active.mediaConnected) {
+          const next = { ...active, status: "connected", mediaConnected: true, connectedAt: active.connectedAt || Date.now() };
+          callRef.current = next;
+          setCall(next);
+        }
+      }
+      if (peer.connectionState === "disconnected") {
+        // a short network blip: give it 3 s, then ask for a fresh route
+        clearTimeout(disconnectTimer);
+        disconnectTimer = setTimeout(async () => {
+          if (peer.connectionState !== "disconnected" || currentUserIdRef.current >= peerId) return;
+          try {
+            const offer = await peer.createOffer({ iceRestart: true });
+            await peer.setLocalDescription(offer);
+            socket.emit("call:signal", { callId, to: peerId, signal: { description: peer.localDescription.toJSON() } });
+          } catch {}
+        }, 3000);
+      }
       // a dropped network (Wi-Fi to mobile data, a short outage): the side that made the offer
       // asks for a fresh route a couple of times before giving the participant up
       if (peer.connectionState === "failed" && restarts < 2 && currentUserIdRef.current < peerId) {
@@ -1089,9 +1114,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const remoteEntries = Object.entries(remoteStreams);
   const statusText = call
-    ? call.connectedAt
+    ? call.mediaConnected
       ? formatTime(elapsedSeconds)
-      : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" ? "Connecting" : "Calling"}…`
+      : `${call.status === "ringing" ? "Ringing" : call.status === "connecting" || call.status === "connected" ? "Connecting" : "Calling"}…`
     : "";
   const callName = call
     ? call.isGroup || call.isCaller
@@ -1266,7 +1291,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     <h2 className="call-name">{callName || "Call"}</h2>
                     <p className="call-status">{statusText}</p>
                     {Object.entries(remoteMedia).some(([, state]) => state.muted) && !showVideoStage && <p className="call-sub">Muted</p>}
-                    {call.connectedAt && remoteEntries.length === 0 && <p className="call-sub">Connecting audio…</p>}
+                    {call.connectedAt && !call.mediaConnected && <p className="call-sub">Connecting audio…</p>}
                   </div>
 
                   <div className={`call-actions ${call.isVideo ? "is-video" : ""}`}>
@@ -1425,7 +1450,11 @@ function RemoteAudio({ stream }) {
     const resumePlayback = () => {
       if (!stream || document.visibilityState === "hidden") return;
       audio.play().catch((error) => {
-        if (error?.name !== "NotAllowedError") console.error("Unable to resume call audio:", error);
+        if (error?.name === "NotAllowedError") {
+          // the browser blocked sound: play on the next tap anywhere
+          const unlock = () => { audio.play().catch(() => {}); };
+          document.addEventListener("pointerdown", unlock, { once: true, capture: true });
+        } else if (error?.name !== "AbortError") console.error("Unable to resume call audio:", error);
       });
     };
     audio.addEventListener("canplay", resumePlayback);
