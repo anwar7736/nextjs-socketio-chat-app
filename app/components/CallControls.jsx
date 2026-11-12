@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FaVideo } from "react-icons/fa";
-import { FiArrowLeft, FiClock, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiVideo, FiVideoOff, FiX } from "react-icons/fi";
+import { FiArrowLeft, FiBluetooth, FiCheck, FiClock, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiSmartphone, FiVideo, FiVideoOff, FiVolume2, FiX } from "react-icons/fi";
 import { MdAddIcCall } from "react-icons/md";
 import { toast } from "react-toastify";
 import { UserListContext } from "../contexts/UserListContext";
@@ -147,6 +147,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [audioDevices, setAudioDevices] = useState([]);
   const [audioInputId, setAudioInputId] = useState("");
   const [audioOutputId, setAudioOutputId] = useState("");
+  const [audioRoute, setAudioRoute] = useState("speaker");
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
+  const audioMenuRef = useRef(null);
 
   const personFor = useCallback((id) => (Array.isArray(users) ? users.find((item) => item?._id === id) : null), [users]);
 
@@ -219,16 +222,55 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   useEffect(() => {
     if (!call) return;
-    navigator.mediaDevices?.enumerateDevices?.().then((devices) => {
-      setAudioDevices(devices.filter((device) => device.kind === "audioinput" || device.kind === "audiooutput"));
-    }).catch((error) => console.error("Unable to enumerate audio devices:", error));
+    let active = true;
+    const refreshDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices?.enumerateDevices?.();
+        if (active && devices) {
+          setAudioDevices(devices.filter((device) => device.kind === "audioinput" || device.kind === "audiooutput"));
+        }
+      } catch (error) {
+        console.error("Unable to enumerate audio devices:", error);
+      }
+    };
+    refreshDevices();
+    navigator.mediaDevices?.addEventListener?.("devicechange", refreshDevices);
+    return () => {
+      active = false;
+      navigator.mediaDevices?.removeEventListener?.("devicechange", refreshDevices);
+    };
   }, [call]);
+
+  useEffect(() => {
+    if (!audioMenuOpen) return;
+    const closeOnOutsidePointer = (event) => {
+      if (event.target instanceof Node && !audioMenuRef.current?.contains(event.target)) {
+        setAudioMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setAudioMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [audioMenuOpen]);
 
   const changeAudioInput = async (deviceId) => {
     const stream = localStreamRef.current;
-    if (!stream || !deviceId) return;
+    if (!stream) return;
     try {
-      const fresh = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true }, video: false });
+      const fresh = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+        video: false,
+      });
       const nextTrack = fresh.getAudioTracks()[0];
       nextTrack.enabled = !muted;
       for (const peer of peersRef.current.values()) {
@@ -248,19 +290,82 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   };
 
   const changeAudioOutput = async (deviceId) => {
-    setAudioOutputId(deviceId);
-    const elements = [...document.querySelectorAll(".call-screen audio, .call-screen video")];
+    const elements = [...document.querySelectorAll(".call-screen audio, .call-screen video")]
+      .filter((element) => !element.muted);
+    const supportedElements = elements.filter((element) => typeof element.setSinkId === "function");
+    if (elements.length && !supportedElements.length) {
+      return false;
+    }
     for (const element of elements) {
-      if (typeof element.setSinkId === "function") {
-        try {
-          await element.setSinkId(deviceId);
-        } catch (error) {
-          toast.error(error.message || "Unable to switch audio output.");
-          return;
-        }
+      if (typeof element.setSinkId !== "function") continue;
+      try {
+        await element.setSinkId(deviceId);
+      } catch (error) {
+        toast.error(error.message || "Unable to switch audio output.");
+        return false;
       }
     }
+    setAudioOutputId(deviceId);
+    return true;
   };
+
+  const changeAudioRoute = async (route) => {
+    const outputs = audioDevices.filter((device) => device.kind === "audiooutput");
+    const matches = {
+      speaker: /speaker|loudspeaker/i,
+      earpiece: /earpiece|receiver|phone/i,
+      bluetooth: /bluetooth|headset|headphone/i,
+    };
+    let device = outputs.find((item) => matches[route].test(item.label || ""));
+    if (route === "speaker") {
+      device = device || outputs.find((item) => item.deviceId === "default") || outputs[0];
+    }
+
+    if (!device && route === "bluetooth" && navigator.mediaDevices?.selectAudioOutput) {
+      try {
+        device = await navigator.mediaDevices.selectAudioOutput();
+      } catch (error) {
+        if (error?.name !== "NotAllowedError" && error?.name !== "AbortError") {
+          toast.error(error.message || "Unable to choose a Bluetooth audio device.");
+        }
+        return;
+      }
+    }
+
+    if (device) {
+      const applied = await changeAudioOutput(device.deviceId);
+      if (!applied) {
+        toast.info("This browser does not support selecting call audio output. Change it in your device audio settings.");
+        return;
+      }
+    } else if (route !== "speaker") {
+      toast.info(`${route === "earpiece" ? "Earpiece" : "Bluetooth"} routing is not available in this browser. Use your device audio controls.`);
+      return;
+    } else if (outputs.length) {
+      toast.info("This browser controls call audio through your device audio settings.");
+      return;
+    }
+
+    setAudioRoute(route);
+    setAudioMenuOpen(false);
+  };
+
+  useEffect(() => {
+    if (!audioOutputId) return;
+    const applyOutputToNewElements = async () => {
+      const elements = [...document.querySelectorAll(".call-screen audio, .call-screen video")]
+        .filter((element) => !element.muted);
+      for (const element of elements) {
+        if (typeof element.setSinkId !== "function" || element.sinkId === audioOutputId) continue;
+        try {
+          await element.setSinkId(audioOutputId);
+        } catch (error) {
+          console.error("Unable to apply selected call audio output:", error);
+        }
+      }
+    };
+    applyOutputToNewElements();
+  }, [audioOutputId, call, remoteStreams]);
 
   const removePeer = useCallback((peerId) => {
     peersRef.current.get(peerId)?.close();
@@ -366,7 +471,11 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     }
     try {
       return await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
+        audio: {
+          ...(audioInputId ? { deviceId: { exact: audioInputId } } : {}),
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
         video: video ? { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } } : false,
       });
     } catch (error) {
@@ -943,12 +1052,53 @@ export default function CallControls({ conversation, currentUser, showButtons = 
             <video id="local-call-stream" className={`call-self-view ${facingMode === "user" ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""}`} autoPlay playsInline muted />
           )}
 
-          <div className="call-actions">
-            <div className="call-action">
-              <button type="button" className={`call-round ${muted ? "is-on" : ""}`} aria-pressed={muted} onClick={() => toggleTrack("audio")} aria-label={muted ? "Unmute" : "Mute"}>
-                {muted ? <FiMicOff /> : <FiMic />}
+          <div className={`call-actions ${call.isVideo ? "is-video" : ""}`}>
+            <div className="call-action call-audio-action" ref={audioMenuRef}>
+              <button
+                type="button"
+                className={`call-round ${audioMenuOpen || audioRoute !== "speaker" ? "is-on" : ""}`}
+                onClick={() => setAudioMenuOpen((open) => !open)}
+                aria-label="Choose audio output"
+                aria-expanded={audioMenuOpen}
+                aria-haspopup="menu"
+                title="Audio output"
+              >
+                {audioRoute === "bluetooth" ? <FiBluetooth /> : audioRoute === "earpiece" ? <FiSmartphone /> : <FiVolume2 />}
               </button>
-              <span>{muted ? "Unmute" : "Mute"}</span>
+              <span>Audio</span>
+              {audioMenuOpen && (
+                <div className="call-audio-menu" role="menu" aria-label="Audio output">
+                  {[
+                    { id: "speaker", label: "Speaker", icon: FiVolume2 },
+                    { id: "earpiece", label: "Earpiece", icon: FiSmartphone },
+                    { id: "bluetooth", label: "Bluetooth", icon: FiBluetooth },
+                  ].map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={audioRoute === id}
+                      className={audioRoute === id ? "is-selected" : ""}
+                      onClick={() => changeAudioRoute(id)}
+                    >
+                      <Icon />
+                      <span>{label}</span>
+                      {audioRoute === id && <FiCheck className="call-audio-check" />}
+                    </button>
+                  ))}
+                  {audioDevices.some((device) => device.kind === "audioinput") && (
+                    <label className="call-microphone-picker">
+                      <span><FiMic /> Microphone</span>
+                      <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
+                        <option value="">Default</option>
+                        {audioDevices.filter((device) => device.kind === "audioinput").map((device, index) => (
+                          <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
             {call.isVideo && (
               <div className="call-action">
@@ -958,6 +1108,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                 <span>Camera</span>
               </div>
             )}
+            <div className="call-action">
+              <button type="button" className={`call-round ${muted ? "is-on" : ""}`} aria-pressed={muted} onClick={() => toggleTrack("audio")} aria-label={muted ? "Unmute" : "Mute"}>
+                {muted ? <FiMicOff /> : <FiMic />}
+              </button>
+              <span>{muted ? "Unmute" : "Mute"}</span>
+            </div>
             {call.isVideo && (
               <div className="call-action">
                 <button type="button" className="call-round" onClick={flipCamera} aria-label="Switch camera">
@@ -971,26 +1127,6 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                 <FiPhoneOff />
               </button>
               <span>End</span>
-            </div>
-            <div className="call-device-selects">
-              <label>
-                <span>Microphone</span>
-                <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
-                  <option value="">Default</option>
-                  {audioDevices.filter((device) => device.kind === "audioinput").map((device, index) => (
-                    <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Speaker</span>
-                <select value={audioOutputId} onChange={(event) => changeAudioOutput(event.target.value)} disabled={!audioDevices.some((device) => device.kind === "audiooutput")}>
-                  <option value="">Default</option>
-                  {audioDevices.filter((device) => device.kind === "audiooutput").map((device, index) => (
-                    <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Speaker ${index + 1}`}</option>
-                  ))}
-                </select>
-              </label>
             </div>
           </div>
         </div>

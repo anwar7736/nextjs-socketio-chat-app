@@ -1168,22 +1168,33 @@ form:has(> .print-container),
 .call-actions {
   position: relative;
   z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: center;
-  gap: clamp(14px, 6vw, 28px);
+  display: grid;
+  width: min(100%, 520px);
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
+  align-items: start;
+  justify-items: center;
+  gap: 20px clamp(14px, 6vw, 28px);
   border-radius: 28px;
   background: rgb(15 22 41 / 72%);
-  padding: 16px 22px 12px;
+  padding: 20px 16px 16px;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 
 .call-actions.is-incoming {
+  display: flex;
+  width: auto;
   gap: clamp(60px, 26vw, 140px);
   background: transparent;
   backdrop-filter: none;
+}
+
+.call-actions.is-video > .call-action:nth-last-child(2) {
+  grid-column: 1;
+}
+
+.call-actions.is-video > .call-action:last-child {
+  grid-column: 3;
 }
 
 .call-action {
@@ -1193,6 +1204,85 @@ form:has(> .print-container),
   gap: 6px;
   color: #c7d2e3;
   font-size: 12px;
+}
+
+.call-audio-action {
+  position: relative;
+}
+
+.call-audio-menu {
+  position: absolute;
+  bottom: calc(100% + 28px);
+  left: -16px;
+  z-index: 8;
+  width: min(250px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 5%);
+  border-radius: 14px;
+  background: #202a2b;
+  padding: 8px 0;
+  color: #f3f4f4;
+  text-align: left;
+  box-shadow: 0 16px 44px rgb(0 0 0 / 42%);
+  animation: overlay-fade-in 140ms ease-out both;
+}
+
+.call-audio-menu > button {
+  display: flex;
+  width: 100%;
+  min-height: 56px;
+  align-items: center;
+  gap: 18px;
+  padding: 0 18px;
+  color: inherit;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.call-audio-menu > button:hover,
+.call-audio-menu > button.is-selected {
+  background: rgb(255 255 255 / 7%);
+}
+
+.call-audio-menu > button > svg {
+  width: 21px;
+  height: 21px;
+  flex: 0 0 auto;
+}
+
+.call-audio-menu .call-audio-check {
+  width: 17px;
+  height: 17px;
+  margin-left: auto;
+  color: #a5b4fc;
+}
+
+.call-microphone-picker {
+  display: grid;
+  gap: 7px;
+  margin: 6px 12px 4px;
+  border-top: 1px solid rgb(255 255 255 / 12%);
+  padding: 12px 6px 4px;
+  color: #d3dbea;
+  font-size: 12px;
+  text-align: left;
+}
+
+.call-microphone-picker > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.call-microphone-picker > select {
+  width: 100%;
+  border: 1px solid #48545a;
+  border-radius: 8px;
+  background: #12191b;
+  padding: 8px 10px;
+  color: white;
+  font-size: 13px;
 }
 
 .call-round {
@@ -1347,30 +1437,6 @@ form:has(> .print-container),
   border-radius: 50%;
   background: #4ade80;
   box-shadow: 0 0 0 4px rgb(74 222 128 / 15%);
-}
-
-.call-device-selects {
-  display: flex;
-  flex-basis: 100%;
-  justify-content: center;
-  gap: 12px;
-  color: #c7d2e3;
-}
-
-.call-device-selects label {
-  display: grid;
-  gap: 4px;
-  font-size: 11px;
-}
-
-.call-device-selects select {
-  max-width: min(42vw, 190px);
-  border: 1px solid #394761;
-  border-radius: 8px;
-  background: #111827;
-  padding: 5px 8px;
-  color: white;
-  font-size: 12px;
 }
 
 .call-history-popover {
