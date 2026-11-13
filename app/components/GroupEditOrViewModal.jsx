@@ -49,7 +49,8 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     setPreview(data?.photo ? getImageURL(data.photo) : "");
     setPhoto("");
     clearErrors();
-  }, [isOpen, data?._id, data?.name, data?.short_desc, data?.photo, setValue, clearErrors]);
+    setIsDisabled(false);
+  }, [isOpen, data?._id, data?.name, data?.short_desc, data?.photo, setValue, clearErrors, setIsDisabled]);
 
   useEffect(() => {
     if (isOpen) setNickname(selectedUser?.nickname || "");
