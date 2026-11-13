@@ -49,7 +49,7 @@ export async function POST(request) {
         "created_by": created_by,
     };
 
-    if (photo) {
+    if (photo && typeof photo !== "string" && photo.size > 0) {
         try {
             inputs.photo = await saveProfileImage(photo);
         } catch (error) {
@@ -60,7 +60,6 @@ export async function POST(request) {
     data = await new groupSchema(inputs);
     data = await data.save();
     if (data) {
-        inputs = [];
         inputs = group_members?.map(member => ({
             ...member,
             group_id: data?._id,
@@ -98,7 +97,7 @@ export async function GET(request) {
     if (!membership) return NextResponse.json({ success: false, message: "Group not found." }, { status: 404 });
     let data = await groupSchema.aggregate([
         {
-            $match: { _id: new mongoose.Types.ObjectId(_id) } // Match the group by its ID
+            $match: { _id: new mongoose.Types.ObjectId(_id) }
         },
         {
             $lookup: {
@@ -113,12 +112,12 @@ export async function GET(request) {
         },
         {
             $match: {
-                "members.status": 1 // Filter only active members
+                "members.status": 1
             }
         },
         {
             $lookup: {
-                from: 'users', // Join users to get the creator details of each member
+                from: 'users',
                 localField: 'members.created_by',
                 foreignField: '_id',
                 as: 'members.created_by_user',
@@ -127,23 +126,23 @@ export async function GET(request) {
         {
             $unwind: {
                 path: "$members.created_by_user",
-                preserveNullAndEmptyArrays: true // Handle cases where created_by_user might be null
+                preserveNullAndEmptyArrays: true
             }
         },
         {
             $group: {
-                _id: "$_id", // Group by group ID
+                _id: "$_id",
                 name: { $first: "$name" },
                 short_desc: { $first: "$short_desc" },
                 photo: { $first: "$photo" },
                 createdAt: { $first: "$createdAt" },
                 created_by: { $first: "$created_by" },
-                creator: { $first: "$creator" }, // Keep creator details
+                creator: { $first: "$creator" },
                 members: {
                     $push: {
                         user_id: "$members.user_id",
                         is_admin: "$members.is_admin",
-                        creator: "$members.created_by_user.name", // Member creator's name
+                        creator: "$members.created_by_user.name",
                         createdAt: "$members.createdAt",
                     }
                 }
@@ -151,7 +150,7 @@ export async function GET(request) {
         },
         {
             $lookup: {
-                from: 'users', // Join users to get creator information for the group
+                from: 'users',
                 localField: 'created_by',
                 foreignField: '_id',
                 as: 'creator',
@@ -169,22 +168,19 @@ export async function GET(request) {
                 createdAt: 1,
                 "creator.name": 1,
                 "creator.photo": 1,
-                members: 1 // Members array
+                members: 1
             }
         }
     ]);
-
-
 
     if (data) {
         data = data.length > 0 ? data[0] : null;
     }
 
-
     return NextResponse.json({ success: Boolean(data), data });
 }
 
-//Update group
+// Update group
 export async function PUT(request) {
     const userId = await getSessionUserId(request);
     if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
@@ -209,7 +205,7 @@ export async function PUT(request) {
         return NextResponse.json({ success: false, message: "Group name must contain at least 3 characters." }, { status: 400 });
     }
     name = name.trim().slice(0, 100);
-    short_desc = typeof short_desc === "string" ? short_desc.slice(0, 500) : "";
+    short_desc = typeof short_desc === "string" ? short_desc.trim().slice(0, 500) : "";
     const adminMembership = await groupMemberSchema.exists({ group_id, user_id: userId, status: 1, is_admin: 1 });
     if (!adminMembership) return NextResponse.json({ success: false, message: "Only active group admins can make changes." }, { status: 403 });
     group_members = group_members
@@ -236,7 +232,7 @@ export async function PUT(request) {
         "photo": old_photo,
     };
 
-    if (photo) {
+    if (photo && typeof photo !== "string" && photo.size > 0) {
         try {
             inputs.photo = await saveProfileImage(photo);
         } catch (error) {
@@ -250,80 +246,64 @@ export async function PUT(request) {
         success = true;
         message = "Group updated successfully.";
         const groupMembersArray = group_members.map(member => member.user_id);
-        const newUsers = []; // Track newly created users
-        const updatedUsers = []; // Track updated users
+        const newUsers = [];
+        const updatedUsers = [];
 
-        // Step 1: Handle Removed Users
+        // Notify and remove members no longer in the group.
         const removedUsers = await groupMemberSchema.find({
             group_id,
-            // status: 1,
             user_id: { $nin: groupMembersArray }
         });
 
-            const removedMsg = `You are removed from ${name} by ${creator?.name || "a group admin"}`;
-        removedUsers.map(user => {
+        const removedMsg = `You are removed from ${name} by ${creator?.name || "a group admin"}`;
+        removedUsers.forEach(member => {
             response.push({
-                user_id: user.user_id,
-                status: 0, // 0 => removed
+                user_id: member.user_id,
+                status: 0,
                 message: removedMsg,
             });
         });
 
-        await groupMemberSchema.deleteMany(
-            { _id: { $in: removedUsers.map(user => user._id) } },
-            // { $set: { status: 0 } }
-        );
+        await groupMemberSchema.deleteMany({ _id: { $in: removedUsers.map(member => member._id) } });
 
-        // Step 2: Handle Added or Updated Users
+        // Add new members and apply admin-role changes.
         for (const member of group_members) {
             const { user_id, is_admin } = member;
-
             const existingMember = await groupMemberSchema.findOne({ group_id, user_id, status: 1 });
 
             if (existingMember) {
-                // Check if is_admin has changed
                 if (existingMember.is_admin != is_admin) {
-                    const message = is_admin
+                    const memberMessage = is_admin
                         ? `Now you are group admin of ${name} by ${creator?.name || "a group admin"}`
                         : `Now you are not group admin of ${name} by ${creator?.name || "a group admin"}`;
                     updatedUsers.push(user_id);
-                    response.push({ user_id, message });
-                    // Update existing member
+                    response.push({ user_id, message: memberMessage });
                     await groupMemberSchema.findOneAndUpdate(
-                        { group_id, user_id }, // Find document by group_id and user_id
-                        { $set: { is_admin } }, // Set is_admin value
-                        { new: true } // Optionally return the updated document
+                        { group_id, user_id },
+                        { $set: { is_admin } },
+                        { new: true }
                     );
                 }
             } else {
-                // Create a new user
-                let res = await new groupMemberSchema({ group_id, user_id, is_admin, created_by });
-                res = await res.save();
-                newUsers.push(user_id); // Track new user
+                const newMember = await new groupMemberSchema({ group_id, user_id, is_admin, created_by }).save();
+                newUsers.push(user_id);
                 response.push({ user_id, status: 1, message: `You are added to ${name} by ${creator?.name || "a group admin"}` });
             }
         }
 
-        // Step 3: Notify Unchanged Users
-        let condition = {
-            user_id: { $in: groupMembersArray },
-            status: 1, // Only active members
+        // Notify all remaining members of group details changes. distinct() returns
+        // user IDs directly (not documents), so use each value as user_id.
+        const condition = {
+            group_id,
+            user_id: { $in: groupMembersArray, $nin: updatedUsers.concat(newUsers) },
+            status: 1,
         };
-
-        // If there are updated or new users, exclude them from the results
-        if (updatedUsers.length > 0 || newUsers.length > 0) {
-            condition.user_id.$nin = updatedUsers.concat(newUsers);
-        }
-
-        // Find the users based on the condition
-        const unchangedUsers = await groupMemberSchema
-            .find(condition)
-            .distinct('user_id'); // Ensures unique user_ids
+        const unchangedUsers = await groupMemberSchema.find(condition).distinct('user_id');
         const groupUpdateMsg = `${name} updated by ${creator?.name || "a group admin"}`;
         if (unchangedUsers.length > 0 && data.modifiedCount > 0) {
-            unchangedUsers.map(user => {
+            unchangedUsers.forEach(memberId => {
                 response.push({
-                    user_id: user._id,
+                    user_id: memberId,
                     message: groupUpdateMsg,
                 });
             });
@@ -331,27 +311,26 @@ export async function PUT(request) {
 
         response = response.filter(res => String(res?.user_id) !== String(created_by));
 
-        // Finalize the response
         data = {
             _id: group_id,
             name,
+            short_desc,
             photo: inputs.photo,
-            total_members: group_members?.length,
+            total_members: group_members.length,
             member_ids: groupMembersArray.map(String),
             response,
             causer_id: created_by
         };
     }
 
-
     return NextResponse.json({ success, message, data });
 }
 
 
-//Leave from group
+// Leave from group
 export async function PATCH(request) {
     const sessionUserId = await getSessionUserId(request);
-    const {group_id} = await request.json();
+    const { group_id } = await request.json();
     if (!sessionUserId || !mongoose.isValidObjectId(group_id)) {
         return NextResponse.json({ success: false, message: "Unauthorized or invalid group." }, { status: 400 });
     }
