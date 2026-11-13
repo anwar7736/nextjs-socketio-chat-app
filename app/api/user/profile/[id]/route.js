@@ -58,7 +58,10 @@ export async function PUT(request, content) {
             inputs.password = await bcrypt.hash(password, 12);
         }
 
-        if (photo) {
+        // The form may submit no photo (or a string placeholder from FormData).
+        // Only validate/store a non-empty uploaded file; otherwise keep the
+        // current profile photo unchanged.
+        if (photo && typeof photo !== "string" && photo.size > 0) {
             try {
                 inputs.photo = await saveProfileImage(photo);
             } catch (error) {
