@@ -1169,6 +1169,23 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       }
     };
   }, [callScreenOpen]);
+  // after the full call screen hides (minimized or call ended) the page can be left scrolled
+  // (mobile browsers shift the window under a full-screen overlay): put the app back at the top
+  const wasCallScreenOpenRef = useRef(false);
+  useEffect(() => {
+    if (callScreenOpen) { wasCallScreenOpenRef.current = true; return; }
+    if (!wasCallScreenOpenRef.current) return;
+    wasCallScreenOpenRef.current = false;
+    const resetScroll = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    resetScroll();
+    const frame = requestAnimationFrame(resetScroll);
+    const timer = setTimeout(resetScroll, 350); // after the history.back() and layout settle
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
+  }, [callScreenOpen]);
   // the small "call in progress" bar can be dragged anywhere on screen (a tap still presses its buttons)
   const [miniOffset, setMiniOffset] = useState({ x: 0, y: 0 });
   const miniDragRef = useRef(null);
