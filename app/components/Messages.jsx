@@ -289,21 +289,54 @@ const Messages = () => {
     }
   };
 
+  const deleteCallLogRequest = async (callLog, mode) => {
+    const response = await fetch("/api/calls/history", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callId: callLog.callId, mode }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Unable to delete this call log.");
+    }
+    if (result.socket_event) socket.emit("call-log-deleted", result.socket_event);
+    return callLog;
+  };
+
+  const applyDeletedCallLogs = (deleted) => {
+    if (!deleted.length) return;
+    const deletedIds = new Set(deleted.map((item) => item._id));
+    const deletedCallIds = new Set(deleted.map((item) => item.callId));
+    setCallLogs((current) => (current || []).filter((item) => !deletedCallIds.has(item?.callId)));
+    setSelectedIds((current) => current.filter((id) => !deletedIds.has(id)));
+    window.dispatchEvent(new Event("chat:refresh-conversations"));
+  };
+
+  // one delete for whatever is selected: messages and call logs together.
+  // "for everyone" applies to your own messages and the calls you started; everything else is removed for you.
   const confirmDeleteSelected = async () => {
     const selected = (messages || []).filter((msg) => selectedIds.includes(msg?._id));
-    if (!selected.length || deleting) return;
+    const selectedCalls = (callLogs || []).filter((item) => selectedIds.includes(item?._id));
+    if ((!selected.length && !selectedCalls.length) || deleting) return;
     setDeleteConfirmationOpen(false);
     setDeleting(true);
     try {
-      const results = await Promise.allSettled(selected.map((msg) => removeMessage(msg, deleteMode)));
-      if (results.some((result) => result.status === "fulfilled")) {
+      const [messageResults, callResults] = await Promise.all([
+        Promise.allSettled(selected.map((msg) => removeMessage(msg, deleteMode))),
+        Promise.allSettled(selectedCalls.map((callLog) => deleteCallLogRequest(
+          callLog,
+          deleteMode !== "for-me" && String(callLog.callerId) === String(user?._id) ? "everyone" : "for-me"
+        ))),
+      ]);
+      applyDeletedCallLogs(callResults.filter((result) => result.status === "fulfilled").map((result) => result.value));
+      if (messageResults.some((result) => result.status === "fulfilled")) {
         window.dispatchEvent(new Event("chat:refresh-conversations"));
       }
-      const failed = results.find((result) => result.status === "rejected");
-      if (failed) throw failed.reason;
+      const failedResult = [...messageResults, ...callResults].find((result) => result.status === "rejected");
+      if (failedResult) throw failedResult.reason;
       clearSelection();
     } catch (error) {
-      toast.error(error.message || "Unable to remove a selected message.");
+      toast.error(error.message || "Unable to remove a selected item.");
     } finally {
       setDeleting(false);
     }
@@ -313,31 +346,8 @@ const Messages = () => {
     if (!selectedCallLogs.length || deletingCall) return;
     setDeletingCall(true);
     try {
-      const results = await Promise.allSettled(selectedCallLogs.map(async (callLog) => {
-        const response = await fetch("/api/calls/history", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ callId: callLog.callId, mode: callDeleteMode }),
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || !result.success) {
-          throw new Error(result.message || "Unable to delete this call log.");
-        }
-        if (result.socket_event) socket.emit("call-log-deleted", result.socket_event);
-        return callLog;
-      }));
-      const deleted = results
-        .filter((result) => result.status === "fulfilled")
-        .map((result) => result.value);
-      if (deleted.length) {
-        const deletedIds = new Set(deleted.map((item) => item._id));
-        const deletedCallIds = new Set(deleted.map((item) => item.callId));
-        setCallLogs((current) =>
-          (current || []).filter((item) => !deletedCallIds.has(item?.callId))
-        );
-        setSelectedIds((current) => current.filter((id) => !deletedIds.has(id)));
-        window.dispatchEvent(new Event("chat:refresh-conversations"));
-      }
+      const results = await Promise.allSettled(selectedCallLogs.map((callLog) => deleteCallLogRequest(callLog, callDeleteMode)));
+      applyDeletedCallLogs(results.filter((result) => result.status === "fulfilled").map((result) => result.value));
       const failed = results.find((result) => result.status === "rejected");
       if (failed) throw failed.reason;
 
@@ -412,18 +422,16 @@ const Messages = () => {
     setReactionFor(type === "message" ? data?._id : null);
   };
 
+  // messages and call logs can be selected together (one delete for both)
   const toggleSelected = (messageId, type = "message") => {
-    if (selectionType !== type) {
-      setSelectionType(type);
-      setSelectedIds([messageId]);
-      setReactionFor(null);
-      return;
-    }
+    setSelectionType(type);
     setSelectedIds((current) => {
       const next = current.includes(messageId)
         ? current.filter((id) => id !== messageId)
         : [...current, messageId];
-      setReactionFor(next.length === 1 ? next[0] : null);
+      // the reaction bar belongs to a single selected message (not a call log)
+      const onlyMessage = next.length === 1 && (messagesRef.current || []).some((item) => item?._id === next[0]);
+      setReactionFor(onlyMessage ? next[0] : null);
       return next;
     });
   };
@@ -569,9 +577,11 @@ const Messages = () => {
     String(item?.conversationId) === String(conversationUser?._id) &&
     Boolean(item?.isGroup) === (Number(conversationUser?.is_group) === 1)
   );
-  const selectedCallLogs = selectionType === "call"
-    ? visibleCallLogs.filter((item) => selectedIds.includes(item?._id))
-    : [];
+  const selectedCallLogs = visibleCallLogs.filter((item) => selectedIds.includes(item?._id));
+  const ownCallCount = selectedCallLogs.filter((item) => String(item?.callerId) === String(user?._id)).length;
+  const totalSelected = selectedMessages.length + selectedCallLogs.length;
+  const everyoneCapableCount = ownSelectedCount + ownCallCount; // items "delete for everyone" can apply to
+  const singleMessageOnly = selectedMessages.length === 1 && selectedCallLogs.length === 0;
   const canDeleteCallLogsForEveryone = selectedCallLogs.length > 0 &&
     selectedCallLogs.every((item) => String(item?.callerId) === String(user?._id));
   const timelineItems = [
@@ -594,19 +604,19 @@ const Messages = () => {
             <FiX />
           </button>
           <span className="font-semibold">{selectedIds.length}</span>
-          <span className="text-sm text-[#91a0b7]">{selectionType === "call" ? "call logs selected" : "selected"}</span>
+          <span className="text-sm text-[#91a0b7]">selected</span>
           <div className="ml-auto flex items-center gap-1">
-            {selectionType === "message" && selectedIds.length === 1 && (
+            {singleMessageOnly && (
               <button type="button" className="selection-icon-button" onClick={() => requestReply(selectedMessages[0])} aria-label="Reply" title="Reply">
                 <FiCornerUpLeft />
               </button>
             )}
-            {selectionType === "message" && selectedIds.length === 1 && (
+            {singleMessageOnly && (
               <button type="button" className="selection-icon-button" onClick={copySelectedMessage} aria-label="Copy message" title="Copy">
                 <FiCopy />
               </button>
             )}
-            {selectionType === "message" && selectedIds.length === 1 && selectedMessages[0]?.sender?._id === user?._id && selectedMessages[0]?.message?.type === "text" && (
+            {singleMessageOnly && selectedMessages[0]?.sender?._id === user?._id && selectedMessages[0]?.message?.type === "text" && (
               <button type="button" className="selection-icon-button" onClick={openEditMessage} aria-label="Edit message" title="Edit">
                 <FiEdit2 />
               </button>
@@ -615,15 +625,15 @@ const Messages = () => {
               type="button"
               className="selection-icon-button is-danger"
               onClick={() => {
-                if (selectionType === "call") {
+                if (selectedMessages.length === 0 && selectedCallLogs.length > 0) {
                   setCallDeleteMode("for-me");
                   setCallDeleteConfirmationOpen(true);
                 } else {
-                  openDeleteConfirmation();
+                  openDeleteConfirmation(); // messages, or messages together with call logs
                 }
               }}
               disabled={deleting || deletingCall}
-              aria-label={`Delete ${selectedIds.length} selected ${selectionType === "call" ? "call logs" : "messages"}`}
+              aria-label={`Delete ${selectedIds.length} selected ${selectedCallLogs.length ? "items" : "messages"}`}
               title="Delete"
             >
               <FiTrash2 />
@@ -655,14 +665,24 @@ const Messages = () => {
               <FiX />
             </button>
             <h2 id="delete-confirmation-title">
-              Delete {selectedIds.length} message{selectedIds.length > 1 ? "s" : ""}?
+              Delete {totalSelected} {selectedCallLogs.length ? "item" : "message"}{totalSelected > 1 ? "s" : ""}?
             </h2>
             <p id="delete-confirmation-description">
-              {deleteMode === "for-me" && ownSelectedCount === selectedMessages.length
-                ? "Your message will be removed only from this conversation view."
-                : `${ownSelectedCount} of your message${ownSelectedCount === 1 ? "" : "s"} will be deleted for everyone and ${receivedSelectedCount} received message${receivedSelectedCount === 1 ? "" : "s"} will be removed for you.`}
+              {(() => {
+                const forMeCount = totalSelected - everyoneCapableCount;
+                const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+                if (deleteMode === "for-me") {
+                  return `${totalSelected === 1 ? "This item" : `These ${totalSelected} items`} will be removed only from your conversation view.`;
+                }
+                const everyoneText = [
+                  ownSelectedCount ? plural(ownSelectedCount, "of your message") : "",
+                  ownCallCount ? `${plural(ownCallCount, "call log")} you started` : "",
+                ].filter(Boolean).join(" and ");
+                if (!everyoneText) return `${plural(forMeCount, "item")} will be removed from your conversation view.`;
+                return `${everyoneText} will be deleted for everyone${forMeCount ? ` and ${plural(forMeCount, "other item")} will be removed for you` : ""}.`;
+              })()}
             </p>
-            {ownSelectedCount > 0 && selectedMessages.length === 1 && (
+            {everyoneCapableCount > 0 && (
               <div className="confirmation-delete-options">
                 <label><input type="radio" checked={deleteMode === "for-me"} onChange={() => setDeleteMode("for-me")} /> Delete for me</label>
                 <label><input type="radio" checked={deleteMode !== "for-me"} onChange={() => setDeleteMode("default")} /> Delete for everyone</label>
@@ -679,7 +699,7 @@ const Messages = () => {
           </section>
         </div>
       )}
-      {callDeleteConfirmationOpen && selectionType === "call" && selectedCallLogs.length > 0 && (
+      {callDeleteConfirmationOpen && selectedCallLogs.length > 0 && selectedMessages.length === 0 && (
         <div
           className="confirmation-overlay"
           role="presentation"

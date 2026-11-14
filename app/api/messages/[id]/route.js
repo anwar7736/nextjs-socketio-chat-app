@@ -53,20 +53,22 @@ export async function DELETE(request, context) {
   const message = await messageSchema.findOne({
     _id: log.message_id,
     sender_id: new mongoose.Types.ObjectId(userId),
-  }).select("attachmentUrl group_id");
+  }).select("attachmentUrl group_id deletedForEveryone");
   if (!message || message.deletedForEveryone) return NextResponse.json({ success: false, message: "Message not found." }, { status: 404 });
   const attachmentUrl = message.attachmentUrl;
+  // attachmentUrl has a unique sparse index: an empty string is a value (every second deleted message would
+  // collide on ""), so the fields are removed, not blanked
   await messageSchema.updateOne(
     { _id: message._id, sender_id: new mongoose.Types.ObjectId(userId) },
-    { $set: {
-      message: "",
-      attachmentUrl: "",
-      attachmentName: "",
-      mimeType: "",
-      deletedForEveryone: true,
-      editedAt: null,
-      reactions: [],
-    } }
+    {
+      $set: {
+        message: "",
+        deletedForEveryone: true,
+        editedAt: null,
+        reactions: [],
+      },
+      $unset: { attachmentUrl: "", attachmentName: "", mimeType: "", durationSeconds: "" },
+    }
   );
   const filename = attachmentUrl?.match(/^\/api\/attachments\/([a-f\d]{24})_([a-f\d-]{36}\.(?:jpg|png|gif|webp|webm|ogg|mp3|m4a|mp4|mov|pdf))$/i);
   if (filename && filename[1] === userId) {

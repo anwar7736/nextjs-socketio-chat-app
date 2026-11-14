@@ -888,25 +888,29 @@ const Home = () => {
 
     socket.off("update-group");
     socket.on("update-group", (data) => {
-      setModalOpen(false);
       if (data?.res?.status === 0) {
-        let newUsers = users.filter((user) => user._id !== data?._id);
-        setUsers(newUsers);
-        if (user?._id === data?._id) {
-          setUser("");
-          setMessages([]);
-          setCallLogs([]);
-        }
+        // Current user was removed from this group
+        setUsers((current) => current.filter((item) => item?._id !== data?._id));
+        setUser((current) => {
+          if (current?._id === data?._id) {
+            setMessages([]);
+            setCallLogs([]);
+            setModalOpen(false);
+            return "";
+          }
+          return current;
+        });
       } else {
+        // Update sidebar/header for all group members (including the editor's other tabs)
         const newUser = {
           _id: data?._id,
           name: data?.name,
           photo: data?.photo,
+          short_desc: data?.short_desc,
           member_ids: data?.member_ids || [],
           is_group: 1,
           total_members: data?.total_members,
         };
-
         setUsers((current) => {
           const exists = current.some((item) => item?._id === newUser._id);
           return exists
@@ -916,19 +920,21 @@ const Home = () => {
         setUser((current) => current?._id === newUser._id ? { ...current, ...newUser } : current);
       }
 
-      if (data?.res?.message) toast.success(data.res.message);
+      if (data?.res?.message && !data?.res?.is_causer) toast.success(data.res.message);
     });
 
     socket.off("delete-group");
     socket.on("delete-group", (data) => {
       setModalOpen(false);
-      if (user._id === data?._id) {
-        setUser("");
-        setMessages([]);
-        setCallLogs([]);
-      }
-      let newUsers = users.filter((user) => user._id !== data?._id);
-      setUsers(newUsers);
+      setUser((current) => {
+        if (current?._id === data?._id) {
+          setMessages([]);
+          setCallLogs([]);
+          return "";
+        }
+        return current;
+      });
+      setUsers((current) => current.filter((item) => item?._id !== data?._id));
       if (data.deleted_by !== authUser._id) {
         toast.success(data?.message);
       }
@@ -937,7 +943,7 @@ const Home = () => {
     socket.off("leave-group");
     socket.on("leave-group", (res) => {
       if (user._id === res?._id) {
-        setUser({ ...user, total_members: user.total_members - 1 });
+        setUser((current) => current?._id === res?._id ? { ...current, total_members: (current.total_members || 1) - 1 } : current);
         if (isModalOpen) {
           let newMembers = data?.members?.filter(
             (m) => m.user_id !== res?.user_id

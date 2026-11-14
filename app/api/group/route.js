@@ -309,7 +309,10 @@ export async function PUT(request) {
             });
         }
 
+        // Remove duplicates for the actor, then re-add with is_causer flag
+        // so their own other tabs/devices also receive the real-time update.
         response = response.filter(res => String(res?.user_id) !== String(created_by));
+        response.push({ user_id: created_by, is_causer: true });
 
         data = {
             _id: group_id,
